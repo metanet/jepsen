@@ -7,13 +7,48 @@
   (:import (com.hazelcast.core Hazelcast)
            (com.hazelcast.config Config
                                  LockConfig
+                                 ServiceConfig
                                  MapConfig
-                                 QuorumConfig)))
+                                 QuorumConfig)
+           (com.hazelcast.raft RaftConfig
+                               RaftMember)))
 
 (def opt-spec
   [["-m" "--members MEMBER-LIST" "Comma-separated list of peers to connect to"
     :parse-fn (fn [m]
                 (str/split m #"\s*,\s*"))]])
+
+(defn prepareRaftServiceConfig
+  "Prepare Hazelcast RaftConfig and ServiceConfig"
+  [members]
+  (let [raftConfig (RaftConfig.)
+        serviceConfig (ServiceConfig.)
+
+        ; add raft members
+        _       (doseq [member members]
+                  (info "Adding " member " to raft group")
+                  (.addMember raftConfig (RaftMember. (str member ":5701") member)))
+
+        _ (.setLeaderElectionTimeoutInMillis raftConfig 1000)
+        _ (.setLeaderHeartbeatPeriodInMillis raftConfig 1000)
+
+        ; prepare service config
+        _ (.setEnabled serviceConfig true)
+        _ (.setName serviceConfig com.hazelcast.raft.impl.service.RaftService/SERVICE_NAME)
+        _ (.setClassName serviceConfig (.getName com.hazelcast.raft.impl.service.RaftService))
+        _ (.setConfigObject serviceConfig raftConfig)
+        ]
+    serviceConfig))
+
+(defn prepareAtomicLongServiceConfig
+  "Prepare Raft AtomicLong service config"
+  []
+  (let [serviceConfig (ServiceConfig.)
+        _ (.setEnabled serviceConfig true)
+        _ (.setName serviceConfig com.hazelcast.raft.service.atomiclong.RaftAtomicLongService/SERVICE_NAME)
+        _ (.setClassName serviceConfig (.getName com.hazelcast.raft.service.atomiclong.RaftAtomicLongService))
+        ]
+    serviceConfig))
 
 (defn -main
   "Go go go"
@@ -23,24 +58,29 @@
                 summary
                 errors]} (cli/parse-opts args opt-spec)
         config  (Config.)
+        members (:members options)
 
         ; Timeouts
-        _ (.setProperty config "hazelcast.client.heartbeat.interval" "1000")
-        _ (.setProperty config "hazelcast.client.heartbeat.timeout" "5000")
-        _ (.setProperty config "hazelcast.client.invocation.timeout.seconds" "5")
+        _ (.setProperty config "hazelcast.client.max.no.heartbeat.seconds" "5")
         _ (.setProperty config "hazelcast.heartbeat.interval.seconds" "1")
-        _ (.setProperty config "hazelcast.master.confirmation.interval.seconds" "1")
         _ (.setProperty config "hazelcast.max.no.heartbeat.seconds" "5")
-        _ (.setProperty config "hazelcast.max.no.master.confirmation.seconds" "10")
         _ (.setProperty config "hazelcast.operation.call.timeout.millis" "5000")
+        _ (.setProperty config "hazelcast.wait.seconds.before.join" "0")
+        _ (.setProperty config "hazelcast.merge.first.run.delay.seconds" "1")
+        _ (.setProperty config "hazelcast.merge.next.run.delay.seconds" "1")
 
         ; Network config
         _       (.. config getNetworkConfig getJoin getMulticastConfig
                     (setEnabled false))
         tcp-ip  (.. config getNetworkConfig getJoin getTcpIpConfig)
-        _       (doseq [member (:members options)]
+        _       (doseq [member members]
                   (.addMember tcp-ip member))
         _       (.setEnabled tcp-ip true)
+
+        ; prepare raft services
+        servicesConfig (.getServicesConfig config)
+        _ (.addServiceConfig servicesConfig (prepareRaftServiceConfig members))
+        _ (.addServiceConfig servicesConfig (prepareAtomicLongServiceConfig))
 
         ; Quorum for split-brain protection
         quorum (doto (QuorumConfig.)

@@ -26,8 +26,7 @@
            (com.hazelcast.client.config ClientConfig)
            (com.hazelcast.client HazelcastClient)
            (com.hazelcast.core HazelcastInstance)
-           (com.hazelcast.core IMap)
-           (com.hazelcast.spi.discovery NodeFilter)))
+           (com.hazelcast.core IMap)))
 
 (def local-server-dir
   "Relative path to local server project directory"
@@ -79,7 +78,6 @@
           "/usr/bin/java"
           :-jar jar
           :--members (->> (:nodes test)
-                          (remove #{node})
                           (map cn/ip)
                           (str/join ",")))))
 
@@ -119,11 +117,6 @@
         _ (.setProperty config "hazelcast.client.heartbeat.interval" "1000")
         _ (.setProperty config "hazelcast.client.heartbeat.timeout" "5000")
         _ (.setProperty config "hazelcast.client.invocation.timeout.seconds" "5")
-        _ (.setProperty config "hazelcast.heartbeat.interval.seconds" "1")
-        _ (.setProperty config "hazelcast.master.confirmation.interval.seconds" "1")
-        _ (.setProperty config "hazelcast.max.no.heartbeat.seconds" "5")
-        _ (.setProperty config "hazelcast.max.no.master.confirmation.seconds" "10")
-        _ (.setProperty config "hazelcast.operation.call.timeout.millis" "5000")
 
         net    (doto (.getNetworkConfig config)
                  ; Don't retry operations when network fails (!?)
@@ -140,14 +133,6 @@
         ; Only talk to our node (the client's smart and will try to talk to
         ; everyone, but we're trying to simulate clients in different network
         ; components here)
-        node-filter (reify NodeFilter
-                      (test [this candidate]
-                        (prn node :testing candidate)
-                        (info node :testing candidate)
-                        true))
-        _      (.. net
-                   getDiscoveryConfig
-                   (setNodeFilter node-filter))
         ; Connect to our node
         _      (.addAddress net (into-array String [node]))]
     (HazelcastClient/newHazelcastClient config)))
@@ -160,6 +145,28 @@
       (let [conn (connect node)]
         (atomic-long-id-client conn
                                (.getAtomicLong conn "jepsen.atomic-long"))))
+
+    (invoke! [this test op]
+      (assert (= (:f op) :generate))
+      (assoc op :type :ok, :value (.incrementAndGet atomic-long)))
+
+    (teardown! [this test]
+      (.terminate conn))))
+
+
+(defn create-raft-atomic-long
+  "Creates a new Raft based AtomicLong"
+  [client name test]
+  (com.hazelcast.raft.impl.client.RaftAtomicLong/create client name (count (:nodes test))))
+
+(defn raft-atomic-long-id-client
+  "Generates unique IDs using a Raft based AtomicLong"
+  [conn atomic-long]
+  (reify client/Client
+    (setup! [_ test node]
+      (let [conn (connect node)]
+        (raft-atomic-long-id-client conn
+                   (create-raft-atomic-long conn "jepsen.atomic-long" test))))
 
     (invoke! [this test op]
       (assert (= (:f op) :generate))
@@ -391,6 +398,10 @@
                                       (gen/stagger 1))
                       :checker  (checker/unique-ids)}
    :atomic-long-ids  {:client (atomic-long-id-client nil nil)
+                      :generator (->> {:type :invoke, :f :generate}
+                                      (gen/stagger 1))
+                      :checker  (checker/unique-ids)}
+   :raft-atomic-long-ids  {:client (raft-atomic-long-id-client nil nil)
                       :generator (->> {:type :invoke, :f :generate}
                                       (gen/stagger 1))
                       :checker  (checker/unique-ids)}
