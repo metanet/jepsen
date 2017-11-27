@@ -31,6 +31,7 @@
 
         _ (.setLeaderElectionTimeoutInMillis raftConfig 1000)
         _ (.setLeaderHeartbeatPeriodInMillis raftConfig 1000)
+        _ (.setCommitIndexAdvanceCountToSnapshot raftConfig 50)
 
         ; prepare service config
         _ (.setEnabled serviceConfig true)

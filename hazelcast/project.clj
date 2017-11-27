@@ -6,5 +6,5 @@
   :repositories [["jitpack" "https://jitpack.io"]]
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [jepsen "0.1.6"]
-                 [com.github.mdogan.hazelcast/hazelcast-raft-client "raft-v3"]]
+                 [com.github.mdogan.hazelcast/hazelcast-raft-client "raft-v4"]]
   :main jepsen.hazelcast)
