@@ -30,7 +30,7 @@
                   (.addMember raftConfig (RaftMember. (str member ":5701") member)))
 
         _ (.setLeaderElectionTimeoutInMillis raftConfig 1000)
-        _ (.setLeaderHeartbeatPeriodInMillis raftConfig 1000)
+        _ (.setLeaderHeartbeatPeriodInMillis raftConfig 1500)
         _ (.setCommitIndexAdvanceCountToSnapshot raftConfig 50)
 
         ; prepare service config

@@ -157,7 +157,7 @@
 (defn create-raft-atomic-long
   "Creates a new Raft based AtomicLong"
   [client name test]
-  (com.hazelcast.raft.impl.client.RaftAtomicLong/create client name (count (:nodes test))))
+  (com.hazelcast.raft.service.atomiclong.client.RaftAtomicLong/create client name (count (:nodes test))))
 
 (defn raft-atomic-long-id-client
   "Generates unique IDs using a Raft based AtomicLong"
