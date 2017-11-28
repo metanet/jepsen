@@ -5,8 +5,8 @@
             [clojure.java.shell :refer [sh]]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [knossos.model :as model]
             [jepsen [checker :as checker]
+                    [model :as model]
                     [cli :as cli]
                     [client :as client]
                     [core :as jepsen]
@@ -171,6 +171,31 @@
     (invoke! [this test op]
       (assert (= (:f op) :generate))
       (assoc op :type :ok, :value (.incrementAndGet atomic-long)))
+
+    (teardown! [this test]
+      (.terminate conn))))
+
+(defn raft-cas-register-client
+  "A CAS register using a Raft based AtomicLong"
+  [conn atomic-long]
+  (reify client/Client
+    (setup! [_ test node]
+      (let [conn (connect node)]
+        (raft-cas-register-client conn
+                                    (create-raft-atomic-long conn "jepsen.cas-register" test))))
+
+    (invoke! [this test op]
+      (case (:f op)
+        :read (assoc op :type :ok, :value (.get atomic-long))
+        :write (do (.set atomic-long (:value op))
+                   (assoc op :type :ok))
+        :cas (let [[currentV newV] (:value op)]
+               (if (.compareAndSet atomic-long currentV newV)
+                 (assoc op :type :ok)
+                 (assoc op :type :fail :error :cas-failed)
+                 ))
+        )
+      )
 
     (teardown! [this test]
       (.terminate conn))))
@@ -403,8 +428,16 @@
                       :checker  (checker/unique-ids)}
    :raft-atomic-long-ids  {:client (raft-atomic-long-id-client nil nil)
                       :generator (->> {:type :invoke, :f :generate}
-                                      (gen/stagger 1))
+                                      (gen/stagger 0.5))
                       :checker  (checker/unique-ids)}
+   :raft-cas-register  {:client (raft-cas-register-client nil nil)
+                        :generator (->> (gen/mix [{:type :invoke, :f :read}
+                                         {:type :invoke, :f :write, :value (rand-int 5)}
+                                         {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
+                                        gen/each
+                                        (gen/stagger 0.5))
+                        :checker  (checker/linearizable)
+                        :model     (model/cas-register 0)}
    :id-gen-ids       {:client    (id-gen-id-client nil nil)
                       :generator {:type :invoke, :f :generate}
                       :checker   (checker/unique-ids)}})

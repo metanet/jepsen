@@ -10,7 +10,6 @@
       <sourceFolder url="file://$MODULE_DIR$/dev-resources" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/resources" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/test" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/server/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
@@ -27,10 +26,11 @@
     <orderEntry type="library" name="Leiningen: com.fasterxml.jackson.core/jackson-annotations:2.4.0" level="project" />
     <orderEntry type="library" name="Leiningen: com.fasterxml.jackson.core/jackson-core:2.4.0" level="project" />
     <orderEntry type="library" name="Leiningen: com.fasterxml.jackson.core/jackson-databind:2.4.0" level="project" />
-    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-client:raft-v4" level="project" />
-    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-raft-client:raft-v4" level="project" />
-    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-raft:raft-v4" level="project" />
-    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast:raft-v4" level="project" />
+    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-client:raft-v5" level="project" />
+    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-raft-client:raft-v5" level="project" />
+    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-raft-server:raft-v5" level="project" />
+    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast-raft:raft-v5" level="project" />
+    <orderEntry type="library" name="Leiningen: com.github.mdogan.hazelcast/hazelcast:raft-v5" level="project" />
     <orderEntry type="library" name="Leiningen: com.jcraft/jsch.agentproxy.core:0.0.9" level="project" />
     <orderEntry type="library" name="Leiningen: com.jcraft/jsch.agentproxy.jsch:0.0.9" level="project" />
     <orderEntry type="library" name="Leiningen: com.jcraft/jsch.agentproxy.pageant:0.0.9" level="project" />
