@@ -25,20 +25,24 @@
         serviceConfig (ServiceConfig.)
 
         ; add raft members
+        memberlist (java.util.ArrayList.)
         _       (doseq [member members]
                   (info "Adding " member " to raft group")
-                  (.addMember raftConfig (RaftMember. (str member ":5701") member)))
+                  (.add memberlist (RaftMember. (str member ":5701") member)))
+        _ (.setMembers raftConfig memberlist)
 
         _ (.setLeaderElectionTimeoutInMillis raftConfig 1000)
         _ (.setLeaderHeartbeatPeriodInMillis raftConfig 1500)
         _ (.setCommitIndexAdvanceCountToSnapshot raftConfig 50)
+        _ (.setAppendNopEntryOnLeaderElection raftConfig true)
+        _ (.setMetadataGroupSize raftConfig (count members))
 
         ; prepare service config
         _ (.setEnabled serviceConfig true)
         _ (.setName serviceConfig com.hazelcast.raft.impl.service.RaftService/SERVICE_NAME)
         _ (.setClassName serviceConfig (.getName com.hazelcast.raft.impl.service.RaftService))
         _ (.setConfigObject serviceConfig raftConfig)
-        ]
+      ]
     serviceConfig))
 
 (defn prepareAtomicLongServiceConfig
