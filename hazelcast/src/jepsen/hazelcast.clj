@@ -289,6 +289,55 @@
                          gen/once
                          gen/each)})
 
+(defn create-raft-lock
+  "Creates a new Raft based Lock"
+  [client name test]
+  (com.hazelcast.raft.service.lock.client.RaftLockProxy/create client name (count (:nodes test))))
+
+
+(defn raft-lock-client
+  ([] (raft-lock-client nil nil))
+  ([conn lock-name]
+   (reify client/Client
+     (setup! [_ test node]
+       (let [conn (rc/open! (rc/wrapper {:name  "hazelcast"
+                                         :open  #(connect node)
+                                         :close #(.shutdown %)
+                                         :log?  true}))]
+         (raft-lock-client conn "jepsen.lock")))
+
+     (invoke! [this test op]
+       (try
+         (rc/with-conn [c conn]
+           (let [lock (create-raft-lock c lock-name test)]
+             (case (:f op)
+               :acquire (if (.tryLock lock)
+                          (assoc op :type :ok)
+                          (assoc op :type :fail))
+               :release (do (.unlock lock)
+                            (assoc op :type :ok)))))
+        (catch com.hazelcast.quorum.QuorumException e
+          (Thread/sleep 1000)
+          (assoc op :type :fail, :error :quorum))
+        (catch java.lang.IllegalMonitorStateException e
+          (Thread/sleep 1000)
+          (if (re-find #"Current thread is not owner of the lock!"
+                       (.getMessage e))
+            (assoc op :type :fail, :error :not-lock-owner)
+            (throw e)))
+        (catch java.io.IOException e
+          (Thread/sleep 1000)
+          (condp re-find (.getMessage e)
+            ; This indicates that the Hazelcast client doesn't have a remote
+            ; peer available, and that the message was never sent.
+            #"Packet is not send to owner address"
+            (assoc op :type :fail, :error :client-down)
+
+            (throw e)))))
+
+     (teardown! [this test]
+       (.terminate conn)))))
+
 (defn lock-client
   ([] (lock-client nil nil))
   ([conn lock-name]
@@ -409,6 +458,14 @@
   {:crdt-map         (map-workload {:crdt? true})
    :map              (map-workload {:crdt? false})
    :lock             {:client    (lock-client)
+                      :generator (->> [{:type :invoke, :f :acquire}
+                                       {:type :invoke, :f :release}]
+                                      cycle
+                                      gen/seq
+                                      gen/each)
+                      :checker   (checker/linearizable)
+                      :model     (model/mutex)}
+   :raft-lock       {:client    (raft-lock-client)
                       :generator (->> [{:type :invoke, :f :acquire}
                                        {:type :invoke, :f :release}]
                                       cycle

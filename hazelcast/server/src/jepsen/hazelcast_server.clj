@@ -55,6 +55,16 @@
         ]
     serviceConfig))
 
+(defn prepareLockServiceConfig
+  "Prepare Raft Lock service config"
+  []
+  (let [serviceConfig (ServiceConfig.)
+        _ (.setEnabled serviceConfig true)
+        _ (.setName serviceConfig com.hazelcast.raft.service.lock.RaftLockService/SERVICE_NAME)
+        _ (.setClassName serviceConfig (.getName com.hazelcast.raft.service.lock.RaftLockService))
+        ]
+    serviceConfig))
+
 (defn -main
   "Go go go"
   [& args]
@@ -86,6 +96,7 @@
         servicesConfig (.getServicesConfig config)
         _ (.addServiceConfig servicesConfig (prepareRaftServiceConfig members))
         _ (.addServiceConfig servicesConfig (prepareAtomicLongServiceConfig))
+        _ (.addServiceConfig servicesConfig (prepareLockServiceConfig))
 
         ; Quorum for split-brain protection
         quorum (doto (QuorumConfig.)
