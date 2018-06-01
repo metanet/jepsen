@@ -5,8 +5,8 @@
             [clojure.java.shell :refer [sh]]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [knossos.model :as model]
             [jepsen [checker :as checker]
-                    [model :as model]
                     [cli :as cli]
                     [client :as client]
                     [core :as jepsen]
@@ -51,13 +51,14 @@
   "Ensures the server jar is ready"
   [test node]
   (when (= node (jepsen/primary test))
-    (when-not (.exists (io/file local-server-jar))
+    ; (when-not (.exists (io/file local-server-jar))
       (info "Building server")
       (let [{:keys [exit out err]} (sh "lein" "uberjar" :dir "server")]
         (info out)
         (info err)
         (info exit)
-        (assert (zero? exit))))))
+        (assert (zero? exit)))))
+        ; )
 
 (defn install!
   "Installs the server on remote nodes."
@@ -156,8 +157,8 @@
 
 (defn create-raft-atomic-long
   "Creates a new Raft based AtomicLong"
-  [client name test]
-  (com.hazelcast.raft.service.atomiclong.client.RaftAtomicLong/create client name (count (:nodes test))))
+  [client name]
+  (com.hazelcast.raft.service.atomiclong.client.RaftAtomicLongProxy/create client name))
 
 (defn raft-atomic-long-id-client
   "Generates unique IDs using a Raft based AtomicLong"
@@ -166,7 +167,7 @@
     (setup! [_ test node]
       (let [conn (connect node)]
         (raft-atomic-long-id-client conn
-                   (create-raft-atomic-long conn "jepsen.atomic-long" test))))
+                   (create-raft-atomic-long conn "jepsen.atomic-long"))))
 
     (invoke! [this test op]
       (assert (= (:f op) :generate))
@@ -182,7 +183,7 @@
     (setup! [_ test node]
       (let [conn (connect node)]
         (raft-cas-register-client conn
-                                    (create-raft-atomic-long conn "jepsen.cas-register" test))))
+                                    (create-raft-atomic-long conn "jepsen.cas-register"))))
 
     (invoke! [this test op]
       (case (:f op)
@@ -291,8 +292,8 @@
 
 (defn create-raft-lock
   "Creates a new Raft based Lock"
-  [client name test]
-  (com.hazelcast.raft.service.lock.client.RaftLockProxy/create client name (count (:nodes test))))
+  [client name]
+  (com.hazelcast.raft.service.lock.client.RaftLockProxy/create client name))
 
 
 (defn raft-lock-client
@@ -309,22 +310,16 @@
      (invoke! [this test op]
        (try
          (rc/with-conn [c conn]
-           (let [lock (create-raft-lock c lock-name test)]
+           (let [lock (create-raft-lock c lock-name)]
              (case (:f op)
-               :acquire (if (.tryLock lock)
+               :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
                           (assoc op :type :ok)
                           (assoc op :type :fail))
                :release (do (.unlock lock)
                             (assoc op :type :ok)))))
-        (catch com.hazelcast.quorum.QuorumException e
-          (Thread/sleep 1000)
-          (assoc op :type :fail, :error :quorum))
         (catch java.lang.IllegalMonitorStateException e
           (Thread/sleep 1000)
-          (if (re-find #"Current thread is not owner of the lock!"
-                       (.getMessage e))
-            (assoc op :type :fail, :error :not-lock-owner)
-            (throw e)))
+          (assoc op :type :fail, :error :not-lock-owner))
         (catch java.io.IOException e
           (Thread/sleep 1000)
           (condp re-find (.getMessage e)
@@ -336,7 +331,7 @@
             (throw e)))))
 
      (teardown! [this test]
-       (.terminate conn)))))
+       (.shutdown conn)))))
 
 (defn lock-client
   ([] (lock-client nil nil))

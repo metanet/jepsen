@@ -10,7 +10,12 @@
                  [org.clojure/tools.cli "0.3.5"]
                  [org.clojure/tools.logging "0.3.1"]
                  [spootnik/unilog "0.7.13"]
-                 [com.github.mdogan.hazelcast/hazelcast-raft-server "raft-v8"]]
+                 [com.github.mdogan.hazelcast/hazelcast-raft-server "raft-extended-SNAPSHOT"]]
   :profiles {:uberjar {:uberjar-name "hazelcast-server.jar"}}
   :main jepsen.hazelcast-server
   :aot [jepsen.hazelcast-server])
+
+;; To avoid strict TSL check ("Tried to use insecure HTTP repository without TLS").
+(require 'cemerick.pomegranate.aether)
+(cemerick.pomegranate.aether/register-wagon-factory!
+ "http" #(org.apache.maven.wagon.providers.http.HttpWagon.))

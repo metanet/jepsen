@@ -5,65 +5,41 @@
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import (com.hazelcast.core Hazelcast)
+           (com.hazelcast.config.raft RaftConfig
+                                      RaftAlgorithmConfig
+                                      RaftMetadataGroupConfig)
            (com.hazelcast.config Config
                                  LockConfig
-                                 ServiceConfig
                                  MapConfig
-                                 QuorumConfig)
-           (com.hazelcast.raft RaftConfig
-                               RaftMember)))
+                                 QuorumConfig)))
 
 (def opt-spec
   [["-m" "--members MEMBER-LIST" "Comma-separated list of peers to connect to"
     :parse-fn (fn [m]
                 (str/split m #"\s*,\s*"))]])
 
-(defn prepareRaftServiceConfig
-  "Prepare Hazelcast RaftConfig and ServiceConfig"
+(defn prepareRaftConfig
+  "Prepare Hazelcast RaftConfig"
   [members]
-  (let [raftConfig (RaftConfig.)
-        serviceConfig (ServiceConfig.)
+  (let [raftAlgorithmConfig (RaftAlgorithmConfig.)
+        metadataConfig (RaftMetadataGroupConfig.)
+        raftConfig (RaftConfig.)
 
-        ; add raft members
-        memberlist (java.util.ArrayList.)
-        _       (doseq [member members]
-                  (info "Adding " member " to raft group")
-                  (.add memberlist (RaftMember. (str member ":5701") member)))
-        _ (.setMembers raftConfig memberlist)
+        _ (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
+        _ (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
+        _ (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 50)
+        _ (.setFailOnIndeterminateOperationState raftAlgorithmConfig true)
 
-        _ (.setLeaderElectionTimeoutInMillis raftConfig 1000)
-        _ (.setLeaderHeartbeatPeriodInMillis raftConfig 1500)
-        _ (.setCommitIndexAdvanceCountToSnapshot raftConfig 50)
-        _ (.setAppendNopEntryOnLeaderElection raftConfig true)
-        _ (.setMetadataGroupSize raftConfig (count members))
+        _ (.setInitialRaftMember metadataConfig true)
+        _ (.setGroupSize metadataConfig (count members))
+        _ (.setMetadataGroupSize metadataConfig (count members))
 
-        ; prepare service config
-        _ (.setEnabled serviceConfig true)
-        _ (.setName serviceConfig com.hazelcast.raft.impl.service.RaftService/SERVICE_NAME)
-        _ (.setClassName serviceConfig (.getName com.hazelcast.raft.impl.service.RaftService))
-        _ (.setConfigObject serviceConfig raftConfig)
+        _ (.setRaftAlgorithmConfig raftConfig raftAlgorithmConfig)
+        _ (.setMetadataGroupConfig raftConfig metadataConfig)
+        _ (.setSessionHeartbeatIntervalMillis raftConfig 500)
+        _ (.setSessionTimeToLiveSeconds raftConfig 5)
       ]
-    serviceConfig))
-
-(defn prepareAtomicLongServiceConfig
-  "Prepare Raft AtomicLong service config"
-  []
-  (let [serviceConfig (ServiceConfig.)
-        _ (.setEnabled serviceConfig true)
-        _ (.setName serviceConfig com.hazelcast.raft.service.atomiclong.RaftAtomicLongService/SERVICE_NAME)
-        _ (.setClassName serviceConfig (.getName com.hazelcast.raft.service.atomiclong.RaftAtomicLongService))
-        ]
-    serviceConfig))
-
-(defn prepareLockServiceConfig
-  "Prepare Raft Lock service config"
-  []
-  (let [serviceConfig (ServiceConfig.)
-        _ (.setEnabled serviceConfig true)
-        _ (.setName serviceConfig com.hazelcast.raft.service.lock.RaftLockService/SERVICE_NAME)
-        _ (.setClassName serviceConfig (.getName com.hazelcast.raft.service.lock.RaftLockService))
-        ]
-    serviceConfig))
+    raftConfig))
 
 (defn -main
   "Go go go"
@@ -92,11 +68,8 @@
                   (.addMember tcp-ip member))
         _       (.setEnabled tcp-ip true)
 
-        ; prepare raft services
-        servicesConfig (.getServicesConfig config)
-        _ (.addServiceConfig servicesConfig (prepareRaftServiceConfig members))
-        _ (.addServiceConfig servicesConfig (prepareAtomicLongServiceConfig))
-        _ (.addServiceConfig servicesConfig (prepareLockServiceConfig))
+        ; prepare raft service
+        _ (.setRaftConfig config (prepareRaftConfig members))
 
         ; Quorum for split-brain protection
         quorum (doto (QuorumConfig.)
