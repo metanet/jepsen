@@ -36,8 +36,8 @@
 
         _ (.setRaftAlgorithmConfig raftConfig raftAlgorithmConfig)
         _ (.setMetadataGroupConfig raftConfig metadataConfig)
-        _ (.setSessionHeartbeatIntervalMillis raftConfig 500)
-        _ (.setSessionTimeToLiveSeconds raftConfig 5)
+        _ (.setSessionHeartbeatIntervalMillis raftConfig 1000)
+        _ (.setSessionTimeToLiveSeconds raftConfig 60)
       ]
     raftConfig))
 
