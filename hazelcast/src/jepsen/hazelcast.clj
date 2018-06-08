@@ -298,25 +298,20 @@
 
 (defn raft-lock-client
   ([] (raft-lock-client nil nil))
-  ([conn lock-name]
+  ([conn lock]
    (reify client/Client
      (setup! [_ test node]
-       (let [conn (rc/open! (rc/wrapper {:name  "hazelcast"
-                                         :open  #(connect node)
-                                         :close #(.shutdown %)
-                                         :log?  true}))]
-         (raft-lock-client conn "jepsen.lock")))
+       (let [conn (connect node)]
+         (raft-lock-client conn (.getLock conn "jepsen.raftlock"))))
 
      (invoke! [this test op]
        (try
-         (rc/with-conn [c conn]
-           (let [lock (create-raft-lock c lock-name)]
-             (case (:f op)
-               :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                          (assoc op :type :ok)
-                          (assoc op :type :fail))
-               :release (do (.unlock lock)
-                            (assoc op :type :ok)))))
+          (case (:f op)
+            :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
+                      (assoc op :type :ok)
+                      (assoc op :type :fail))
+            :release (do (.unlock lock)
+                        (assoc op :type :ok)))
         (catch java.lang.IllegalMonitorStateException e
           (Thread/sleep 1000)
           (assoc op :type :fail, :error :not-lock-owner))
@@ -334,26 +329,21 @@
        (.shutdown conn)))))
 
 (defn lock-client
-  ([] (lock-client nil nil))
-  ([conn lock-name]
+  ([lock-name] (lock-client nil nil lock-name))
+  ([conn lock lock-name]
    (reify client/Client
-     (setup! [_ test node]
-       (let [conn (rc/open! (rc/wrapper {:name  "hazelcast"
-                                         :open  #(connect node)
-                                         :close #(.terminate %)
-                                         :log?  true}))]
-         (lock-client conn "jepsen.lock")))
+    (setup! [_ test node]
+       (let [conn (connect node)]
+         (lock-client conn (.getLock conn lock-name) lock-name)))
 
      (invoke! [this test op]
        (try
-         (rc/with-conn [c conn]
-           (let [lock (.getLock c lock-name)]
-             (case (:f op)
-               :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                          (assoc op :type :ok)
-                          (assoc op :type :fail))
-               :release (do (.unlock lock)
-                            (assoc op :type :ok)))))
+          (case (:f op)
+            :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
+                      (assoc op :type :ok)
+                      (assoc op :type :fail))
+            :release (do (.unlock lock)
+                        (assoc op :type :ok)))
         (catch com.hazelcast.quorum.QuorumException e
           (Thread/sleep 1000)
           (assoc op :type :fail, :error :quorum))
@@ -452,7 +442,15 @@
   []
   {:crdt-map         (map-workload {:crdt? true})
    :map              (map-workload {:crdt? false})
-   :lock             {:client    (lock-client)
+   :lock             {:client    (lock-client "jepsen.lock")
+                      :generator (->> [{:type :invoke, :f :acquire}
+                                       {:type :invoke, :f :release}]
+                                      cycle
+                                      gen/seq
+                                      gen/each)
+                      :checker   (checker/linearizable)
+                      :model     (model/mutex)}
+   :lock-no-quorum  {:client    (lock-client "jepsen.lock.no-quorum")
                       :generator (->> [{:type :invoke, :f :acquire}
                                        {:type :invoke, :f :release}]
                                       cycle
