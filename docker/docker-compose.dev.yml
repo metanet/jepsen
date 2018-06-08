@@ -3,3 +3,4 @@ services:
   control:
     volumes:
       - ${JEPSEN_ROOT}:/jepsen # Mounts $JEPSEN_ROOT on host to /jepsen control container
+      - ${HOME}/.m2:/root/.m2 # Mounts local maven repo
