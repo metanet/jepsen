@@ -447,7 +447,8 @@
                                        {:type :invoke, :f :release}]
                                       cycle
                                       gen/seq
-                                      gen/each)
+                                      gen/each
+                                      (gen/stagger 1/10))
                       :checker   (checker/linearizable)
                       :model     (model/mutex)}
    :lock-no-quorum  {:client    (lock-client "jepsen.lock.no-quorum")
@@ -455,7 +456,8 @@
                                        {:type :invoke, :f :release}]
                                       cycle
                                       gen/seq
-                                      gen/each)
+                                      gen/each
+                                      (gen/stagger 1/10))
                       :checker   (checker/linearizable)
                       :model     (model/mutex)}
    :raft-lock       {:client    (raft-lock-client)
@@ -463,18 +465,19 @@
                                        {:type :invoke, :f :release}]
                                       cycle
                                       gen/seq
-                                      gen/each)
+                                      gen/each
+                                      (gen/stagger 1/10))
                       :checker   (checker/linearizable)
                       :model     (model/mutex)}
    :queue            (assoc (queue-client-and-gens)
                             :checker (checker/total-queue))
    :atomic-ref-ids   {:client (atomic-ref-id-client nil nil)
                       :generator (->> {:type :invoke, :f :generate}
-                                      (gen/stagger 1))
+                                      (gen/stagger 0.5))
                       :checker  (checker/unique-ids)}
    :atomic-long-ids  {:client (atomic-long-id-client nil nil)
                       :generator (->> {:type :invoke, :f :generate}
-                                      (gen/stagger 1))
+                                      (gen/stagger 0.5))
                       :checker  (checker/unique-ids)}
    :raft-atomic-long-ids  {:client (raft-atomic-long-id-client nil nil)
                       :generator (->> {:type :invoke, :f :generate}
