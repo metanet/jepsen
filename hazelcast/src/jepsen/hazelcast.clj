@@ -501,7 +501,7 @@
                 checker
                 model]} (get (workloads) (:workload opts))
         generator (->> generator
-                       (gen/nemesis (gen/start-stop 30 15))
+                       (gen/nemesis (gen/start-stop 15 15))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not final-generator
                     generator
