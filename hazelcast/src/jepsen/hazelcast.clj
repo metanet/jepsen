@@ -152,7 +152,7 @@
       (assoc op :type :ok, :value (.incrementAndGet atomic-long)))
 
     (teardown! [this test]
-      (.terminate conn))))
+      (.shutdown conn))))
 
 
 (defn create-raft-atomic-long
@@ -174,7 +174,7 @@
       (assoc op :type :ok, :value (.incrementAndGet atomic-long)))
 
     (teardown! [this test]
-      (.terminate conn))))
+      (.shutdown conn))))
 
 (defn raft-cas-register-client
   "A CAS register using a Raft based AtomicLong"
@@ -199,7 +199,7 @@
       )
 
     (teardown! [this test]
-      (.terminate conn))))
+      (.shutdown conn))))
 
 (defn atomic-ref-id-client
   "Generates unique IDs using an AtomicReference"
@@ -219,7 +219,7 @@
           (assoc op :type :fail, :error :cas-failed))))
 
     (teardown! [this test]
-      (.terminate conn))))
+      (.shutdown conn))))
 
 (defn id-gen-id-client
   "Generates unique IDs using an IdGenerator"
@@ -235,7 +235,7 @@
       (assoc op :type :ok, :value (.newId id-gen)))
 
     (teardown! [this test]
-      (.terminate conn))))
+      (.shutdown conn))))
 
 (def queue-poll-timeout
   "How long to wait for items to become available in the queue, in ms"
@@ -267,7 +267,7 @@
                       (assoc op :type :ok, :value values)))))
 
      (teardown! [this test]
-       (.terminate conn)))))
+       (.shutdown conn)))))
 
 (defn queue-gen
   "A generator for queue operations. Emits enqueues of sequential integers."
@@ -374,7 +374,7 @@
             (throw e)))))
 
      (teardown! [this test]
-       (.terminate conn)))))
+       (.shutdown conn)))))
 
 (def map-name "jepsen.map")
 (def crdt-map-name "jepsen.crdt-map")
@@ -419,7 +419,7 @@
          :read (assoc op :type :ok, :value (into (sorted-set) (.get m "hi")))))
 
      (teardown! [this test]
-       (.terminate conn)))))
+       (.shutdown conn)))))
 
 (defn map-workload
   "A workload for map tests, with the given client options."
