@@ -302,7 +302,7 @@
    (reify client/Client
      (setup! [_ test node]
        (let [conn (connect node)]
-         (raft-lock-client conn (.getLock conn "jepsen.raftlock"))))
+         (raft-lock-client conn (create-raft-lock conn "jepsen.raftlock"))))
 
      (invoke! [this test op]
        (try
