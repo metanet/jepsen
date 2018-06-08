@@ -28,7 +28,7 @@
         _ (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
         _ (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
         _ (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 250)
-        _ (.setFailOnIndeterminateOperationState raftAlgorithmConfig true)
+        ; _ (.setFailOnIndeterminateOperationState raftAlgorithmConfig true)
 
         _ (.setInitialRaftMember metadataConfig true)
         _ (.setGroupSize metadataConfig (count members))
