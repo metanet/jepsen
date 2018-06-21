@@ -11,7 +11,7 @@
                  [org.clojure/tools.logging "0.3.1"]
                  [spootnik/unilog "0.7.13"]
                 ;  [com.github.mdogan.hazelcast/hazelcast-raft-server "raft-extended-SNAPSHOT"]
-                 [com.hazelcast/hazelcast-raft-server "3.11-SNAPSHOT"]]
+                 [com.hazelcast/hazelcast-raft-dataservices "3.11-SNAPSHOT"]]
   :profiles {:uberjar {:uberjar-name "hazelcast-server.jar"}}
   :main jepsen.hazelcast-server
   :aot [jepsen.hazelcast-server])
