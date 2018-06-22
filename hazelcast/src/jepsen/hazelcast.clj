@@ -26,7 +26,7 @@
            (com.hazelcast.client.config ClientConfig)
            (com.hazelcast.client HazelcastClient)
            (com.hazelcast.core HazelcastInstance)
-           (com.hazelcast.core IMap)))
+           (knossos.model Model)))
 
 (def local-server-dir
   "Relative path to local server project directory"
@@ -290,19 +290,13 @@
                          gen/once
                          gen/each)})
 
-(defn create-raft-lock
-  "Creates a new Raft based Lock"
-  [client name]
-  (com.hazelcast.raft.service.lock.client.RaftLockProxy/create client name))
-
-
 (defn raft-lock-client
   ([] (raft-lock-client nil nil))
   ([conn lock]
    (reify client/Client
      (setup! [_ test node]
        (let [conn (connect node)]
-         (raft-lock-client conn (create-raft-lock conn "jepsen.raftlock"))))
+         (raft-lock-client conn (com.hazelcast.raft.service.lock.client.RaftLockProxy/create conn "jepsen.raftlock"))))
 
      (invoke! [this test op]
        (try
@@ -324,6 +318,38 @@
             (assoc op :type :fail, :error :client-down)
 
             (throw e)))))
+
+     (teardown! [this test]
+       (.shutdown conn)))))
+
+(defn raft-reentrant-lock-client
+  ([] (raft-reentrant-lock-client nil nil))
+  ([conn lock]
+   (reify client/Client
+     (setup! [_ test node]
+       (let [conn (connect node)]
+         (raft-reentrant-lock-client conn (com.hazelcast.raft.service.lock.client.RaftLockProxy/create conn "jepsen.raftlock"))))
+
+     (invoke! [this test op]
+       (try
+         (case (:f op)
+           :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
+                      (assoc op :type :ok :value (.getName conn))
+                      (assoc op :type :fail))
+           :release (do (.unlock lock)
+                        (assoc op :type :ok :value (.getName conn))))
+         (catch java.lang.IllegalMonitorStateException e
+           (Thread/sleep 1000)
+           (assoc op :type :fail, :error :not-lock-owner))
+         (catch java.io.IOException e
+           (Thread/sleep 1000)
+           (condp re-find (.getMessage e)
+             ; This indicates that the Hazelcast client doesn't have a remote
+             ; peer available, and that the message was never sent.
+             #"Packet is not send to owner address"
+             (assoc op :type :fail, :error :client-down)
+
+             (throw e)))))
 
      (teardown! [this test]
        (.shutdown conn)))))
@@ -426,6 +452,34 @@
                          gen/each)
    :checker   (checker/set)})
 
+(declare reentrant-mutex)
+(def mutex-id (atom 0N))
+
+(defrecord ReentrantMutex [id version owner lockCount]
+  Model
+  (step [this op]
+    (if (nil? (:value op))
+      (knossos.model/inconsistent "no owner!")
+      (condp = (:f op)
+        :acquire (if (or (nil? owner) (= owner (:value op)))
+                   (reentrant-mutex id version owner (:value op) (+ lockCount 1) op)
+                   (knossos.model/inconsistent "cannot acquire"))
+        :release (if (or (nil? owner) (not= owner (:value op)))
+                   (knossos.model/inconsistent "cannot release")
+                   (if (= lockCount 1)
+                     (reentrant-mutex id version owner nil 0 op)
+                     (reentrant-mutex id version owner owner (- lockCount 1) op))))))
+
+  Object
+  (toString [this] (str "owner: " owner ", lockCount: " lockCount)))
+
+(defn reentrant-mutex
+  "A single reentrant mutex responding to :acquire and :release messages"
+  ([]      (ReentrantMutex. (swap! mutex-id inc) 0 nil 0))
+  ([id version owner newOwner lockCount op]
+   (do (info (str "id: " id ", version: " version ", " (if (= owner newOwner) (str "owner: " newOwner) (str "owner: " owner " -> " newOwner)) ", count: " lockCount ", op: " op))
+       (ReentrantMutex. id (+ version 1) newOwner lockCount)))
+  )
 
 (defn workloads
   "The workloads we can run. Each workload is a map like
@@ -469,6 +523,15 @@
                                       (gen/stagger 1/10))
                       :checker   (checker/linearizable)
                       :model     (model/mutex)}
+   :raft-reentrant-lock       {:client    (raft-reentrant-lock-client)
+                     :generator (->> [{:type :invoke, :f :acquire}
+                                      {:type :invoke, :f :release}]
+                                     cycle
+                                     gen/seq
+                                     gen/each
+                                     (gen/stagger 1/10))
+                     :checker   (checker/linearizable)
+                     :model     (reentrant-mutex)}
    :queue            (assoc (queue-client-and-gens)
                             :checker (checker/total-queue))
    :atomic-ref-ids   {:client (atomic-ref-id-client nil nil)
