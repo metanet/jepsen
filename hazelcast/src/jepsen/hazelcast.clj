@@ -354,6 +354,38 @@
      (teardown! [this test]
        (.shutdown conn)))))
 
+(defn raft-fenced-lock-client
+  ([] (raft-fenced-lock-client nil nil))
+  ([conn lock]
+   (reify client/Client
+     (setup! [_ test node]
+       (let [conn (connect node)]
+         (raft-fenced-lock-client conn (com.hazelcast.raft.service.lock.client.RaftFencedLockProxy/create conn "jepsen.raftlock"))))
+
+     (invoke! [this test op]
+       (try
+         (case (:f op)
+           :acquire (if (not= 0 (.tryLock lock 5000 TimeUnit/MILLISECONDS))
+                     (assoc op :type :ok)
+                     (assoc op :type :fail))
+           :release (do (.unlock lock)
+                       (assoc op :type :ok)))
+         (catch java.lang.IllegalMonitorStateException e
+           (Thread/sleep 1000)
+           (assoc op :type :fail, :error :not-lock-owner))
+         (catch java.io.IOException e
+           (Thread/sleep 1000)
+           (condp re-find (.getMessage e)
+             ; This indicates that the Hazelcast client doesn't have a remote
+             ; peer available, and that the message was never sent.
+             #"Packet is not send to owner address"
+             (assoc op :type :fail, :error :client-down)
+
+             (throw e)))))
+
+     (teardown! [this test]
+       (.shutdown conn)))))
+
 (defn lock-client
   ([lock-name] (lock-client nil nil lock-name))
   ([conn lock lock-name]
@@ -532,6 +564,15 @@
                                      (gen/stagger 1/10))
                      :checker   (checker/linearizable)
                      :model     (reentrant-mutex)}
+   :raft-fenced-lock          {:client    (raft-fenced-lock-client)
+                      :generator (->> [{:type :invoke, :f :acquire}
+                                       {:type :invoke, :f :release}]
+                                      cycle
+                                      gen/seq
+                                      gen/each
+                                      (gen/stagger 1/10))
+                      :checker   (checker/linearizable)
+                      :model     (model/mutex)}
    :queue            (assoc (queue-client-and-gens)
                             :checker (checker/total-queue))
    :atomic-ref-ids   {:client (atomic-ref-id-client nil nil)
