@@ -26,7 +26,8 @@
            (com.hazelcast.client.config ClientConfig)
            (com.hazelcast.client HazelcastClient)
            (com.hazelcast.core HazelcastInstance)
-           (knossos.model Model)))
+           (knossos.model Model)
+           (java.util UUID)))
 
 (def local-server-dir
   "Relative path to local server project directory"
@@ -46,6 +47,8 @@
 
 (def pid-file (str dir "/server.pid"))
 (def log-file (str dir "/server.log"))
+
+(def nodeIdMark "xxxxxxxxxx")
 
 (defn build-server!
   "Ensures the server jar is ready"
@@ -118,6 +121,7 @@
         _ (.setProperty config "hazelcast.client.heartbeat.interval" "1000")
         _ (.setProperty config "hazelcast.client.heartbeat.timeout" "5000")
         _ (.setProperty config "hazelcast.client.invocation.timeout.seconds" "5")
+        _ (.setInstanceName config node)
 
         net    (doto (.getNetworkConfig config)
                  ; Don't retry operations when network fails (!?)
@@ -332,24 +336,25 @@
 
      (invoke! [this test op]
        (try
+         (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
          (case (:f op)
            :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                      (assoc op :type :ok :value (.getName conn))
+                      (assoc op :type :ok)
                       (assoc op :type :fail))
            :release (do (.unlock lock)
-                        (assoc op :type :ok :value (.getName conn))))
+                        (assoc op :type :ok)))
          (catch java.lang.IllegalMonitorStateException e
-           (Thread/sleep 1000)
            (assoc op :type :fail, :error :not-lock-owner))
+         (catch com.hazelcast.core.OperationTimeoutException e
+           (assoc op :type :info, :error :op-timeout))
          (catch java.io.IOException e
-           (Thread/sleep 1000)
            (condp re-find (.getMessage e)
              ; This indicates that the Hazelcast client doesn't have a remote
              ; peer available, and that the message was never sent.
              #"Packet is not send to owner address"
              (assoc op :type :fail, :error :client-down)
-
-             (throw e)))))
+             (throw e)))
+         ))
 
      (teardown! [this test]
        (.shutdown conn)))))
@@ -484,33 +489,90 @@
                          gen/each)
    :checker   (checker/set)})
 
-(declare reentrant-mutex)
-(def mutex-id (atom 0N))
 
-(defrecord ReentrantMutex [id version owner lockCount]
+(defn parseLine [line]
+  (let
+    [ tokens (.split line nodeIdMark) ]
+    [ (:value (clojure.edn/read-string (nth tokens 2))) (.trim (nth tokens 1)) ]))
+
+(def invocations (memoize (fn []
+                            (apply array-map
+                                   (flatten
+                                     (map parseLine
+                                          (.split (:out (sh "grep" nodeIdMark "store/latest/jepsen.log")) "\n")
+                                     ))))))
+
+(defn getNode [op]
+  (get (invocations) (:value op)))
+
+(defrecord ReentrantMutex [owner lockCount]
+  Model
+  (step [this op]
+    (if (nil? (getNode op))
+      (do
+        (info "no owner!")
+        (knossos.model/inconsistent "no owner!"))
+      (condp = (:f op)
+        :acquire (if (and (< lockCount 3) (or (nil? owner) (= owner (getNode op))))
+                   (ReentrantMutex. (getNode op) (+ lockCount 1))
+                   (knossos.model/inconsistent "cannot acquire"))
+        :release (if (or (nil? owner) (not= owner (getNode op)))
+                   (knossos.model/inconsistent "cannot release")
+                   (ReentrantMutex. (if (= lockCount 1) nil owner) (- lockCount 1)))))
+    )
+
+  Object
+  (toString [this] (str "owner: " owner ", lockCount: " lockCount)))
+
+
+
+(defn createInitialReentrantMutex []
+  "A single reentrant mutex responding to :acquire and :release messages"
+  (ReentrantMutex. nil 0))
+
+
+
+
+(declare createCustomMutex)
+
+(defrecord CustomMutex [owner]
   Model
   (step [this op]
     (if (nil? (:value op))
       (knossos.model/inconsistent "no owner!")
       (condp = (:f op)
-        :acquire (if (or (nil? owner) (= owner (:value op)))
-                   (reentrant-mutex id version owner (:value op) (+ lockCount 1) op)
-                   (knossos.model/inconsistent "cannot acquire"))
+        :acquire (if (nil? owner)
+                   (createCustomMutex this (:value op) op)
+                   (do
+                     (info (str "cannot acquire owner: " owner " op: " op " this model hash: " (System/identityHashCode this)))
+                     (knossos.model/inconsistent "cannot acquire")))
         :release (if (or (nil? owner) (not= owner (:value op)))
-                   (knossos.model/inconsistent "cannot release")
-                   (if (= lockCount 1)
-                     (reentrant-mutex id version owner nil 0 op)
-                     (reentrant-mutex id version owner owner (- lockCount 1) op))))))
+                   (do
+                     (info (str "cannot release owner: " owner " op: " op " this model hash: " (System/identityHashCode this)))
+                     (knossos.model/inconsistent "cannot release"))
+                   (createCustomMutex this nil op)
+                   ))))
 
   Object
-  (toString [this] (str "owner: " owner ", lockCount: " lockCount)))
+  (toString [this] (str "owner: " owner)))
 
-(defn reentrant-mutex
+(defn createEmptyCustomMutex []
   "A single reentrant mutex responding to :acquire and :release messages"
-  ([]      (ReentrantMutex. (swap! mutex-id inc) 0 nil 0))
-  ([id version owner newOwner lockCount op]
-   (do (info (str "id: " id ", version: " version ", " (if (= owner newOwner) (str "owner: " newOwner) (str "owner: " owner " -> " newOwner)) ", count: " lockCount ", op: " op))
-       (ReentrantMutex. id (+ version 1) newOwner lockCount)))
+  (let [
+        initial (CustomMutex. nil)
+        _ (info (str "initial model: " (System/identityHashCode initial)))
+        ]
+    initial)
+  )
+
+(defn createCustomMutex [prev owner op]
+  "A single reentrant mutex responding to :acquire and :release messages"
+  (
+    let [
+         newModel (CustomMutex. owner)
+         _ (info (str "owner: " owner ", op: " op " new hash: " (System/identityHashCode newModel) " prev hash:" (System/identityHashCode prev)))
+         ]
+    newModel)
   )
 
 (defn workloads
@@ -526,78 +588,83 @@
   this is a function, instead of a constant--we may need a fresh workload if we
   run more than one test."
   []
-  {:crdt-map         (map-workload {:crdt? true})
-   :map              (map-workload {:crdt? false})
-   :lock             {:client    (lock-client "jepsen.lock")
-                      :generator (->> [{:type :invoke, :f :acquire}
-                                       {:type :invoke, :f :release}]
-                                      cycle
-                                      gen/seq
-                                      gen/each
-                                      (gen/stagger 1/10))
-                      :checker   (checker/linearizable)
-                      :model     (model/mutex)}
-   :lock-no-quorum  {:client    (lock-client "jepsen.lock.no-quorum")
-                      :generator (->> [{:type :invoke, :f :acquire}
-                                       {:type :invoke, :f :release}]
-                                      cycle
-                                      gen/seq
-                                      gen/each
-                                      (gen/stagger 1/10))
-                      :checker   (checker/linearizable)
-                      :model     (model/mutex)}
-   :raft-lock       {:client    (raft-lock-client)
-                      :generator (->> [{:type :invoke, :f :acquire}
-                                       {:type :invoke, :f :release}]
-                                      cycle
-                                      gen/seq
-                                      gen/each
-                                      (gen/stagger 1/10))
-                      :checker   (checker/linearizable)
-                      :model     (model/mutex)}
-   :raft-reentrant-lock       {:client    (raft-reentrant-lock-client)
-                     :generator (->> [{:type :invoke, :f :acquire}
-                                      {:type :invoke, :f :release}]
-                                     cycle
-                                     gen/seq
-                                     gen/each
-                                     (gen/stagger 1/10))
-                     :checker   (checker/linearizable)
-                     :model     (reentrant-mutex)}
-   :raft-fenced-lock          {:client    (raft-fenced-lock-client)
-                      :generator (->> [{:type :invoke, :f :acquire}
-                                       {:type :invoke, :f :release}]
-                                      cycle
-                                      gen/seq
-                                      gen/each
-                                      (gen/stagger 1/10))
-                      :checker   (checker/linearizable)
-                      :model     (model/mutex)}
-   :queue            (assoc (queue-client-and-gens)
-                            :checker (checker/total-queue))
-   :atomic-ref-ids   {:client (atomic-ref-id-client nil nil)
-                      :generator (->> {:type :invoke, :f :generate}
-                                      (gen/stagger 0.5))
-                      :checker  (checker/unique-ids)}
-   :atomic-long-ids  {:client (atomic-long-id-client nil nil)
-                      :generator (->> {:type :invoke, :f :generate}
-                                      (gen/stagger 0.5))
-                      :checker  (checker/unique-ids)}
-   :raft-atomic-long-ids  {:client (raft-atomic-long-id-client nil nil)
-                      :generator (->> {:type :invoke, :f :generate}
-                                      (gen/stagger 0.5))
-                      :checker  (checker/unique-ids)}
-   :raft-cas-register  {:client (raft-cas-register-client nil nil)
-                        :generator (->> (gen/mix [{:type :invoke, :f :read}
-                                         {:type :invoke, :f :write, :value (rand-int 5)}
-                                         {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
-                                        gen/each
-                                        (gen/stagger 0.5))
-                        :checker  (checker/linearizable)
-                        :model     (model/cas-register 0)}
-   :id-gen-ids       {:client    (id-gen-id-client nil nil)
-                      :generator {:type :invoke, :f :generate}
-                      :checker   (checker/unique-ids)}})
+  {:crdt-map             (map-workload {:crdt? true})
+   :map                  (map-workload {:crdt? false})
+   :lock                 {:client    (lock-client "jepsen.lock")
+                          :generator (->> [{:type :invoke, :f :acquire}
+                                           {:type :invoke, :f :release}]
+                                          cycle
+                                          gen/seq
+                                          gen/each
+                                          (gen/stagger 1/10))
+                          :checker   (checker/linearizable)
+                          :model     (model/mutex)}
+   :lock-no-quorum       {:client    (lock-client "jepsen.lock.no-quorum")
+                          :generator (->> [{:type :invoke, :f :acquire}
+                                           {:type :invoke, :f :release}]
+                                          cycle
+                                          gen/seq
+                                          gen/each
+                                          (gen/stagger 1/10))
+                          :checker   (checker/linearizable)
+                          :model     (model/mutex)}
+   :raft-lock            {:client    (raft-lock-client)
+                          :generator (->> [{:type :invoke, :f :acquire}
+                                           {:type :invoke, :f :release}]
+                                          cycle
+                                          gen/seq
+                                          gen/each
+                                          (gen/stagger 1/10))
+                          :checker   (checker/linearizable)
+                          :model     (model/mutex)}
+   :raft-reentrant-lock  {:client    (raft-reentrant-lock-client)
+                          :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
+                                           {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
+                                           ;(gen/sleep 1)
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
+                                           (gen/sleep 1)
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
+                                           (gen/sleep 1)]
+                                          cycle
+                                          gen/seq
+                                          gen/each
+                                          (gen/stagger 1/10))
+                          :checker   (checker/linearizable)
+                          :model     (createInitialReentrantMutex)}
+   :raft-fenced-lock     {:client    (raft-fenced-lock-client)
+                          :generator (->> [{:type :invoke, :f :acquire}
+                                           {:type :invoke, :f :release}]
+                                          cycle
+                                          gen/seq
+                                          gen/each
+                                          (gen/stagger 1/10))
+                          :checker   (checker/linearizable)
+                          :model     (model/mutex)}
+   :queue                (assoc (queue-client-and-gens)
+                           :checker (checker/total-queue))
+   :atomic-ref-ids       {:client    (atomic-ref-id-client nil nil)
+                          :generator (->> {:type :invoke, :f :generate}
+                                          (gen/stagger 0.5))
+                          :checker   (checker/unique-ids)}
+   :atomic-long-ids      {:client    (atomic-long-id-client nil nil)
+                          :generator (->> {:type :invoke, :f :generate}
+                                          (gen/stagger 0.5))
+                          :checker   (checker/unique-ids)}
+   :raft-atomic-long-ids {:client    (raft-atomic-long-id-client nil nil)
+                          :generator (->> {:type :invoke, :f :generate}
+                                          (gen/stagger 0.5))
+                          :checker   (checker/unique-ids)}
+   :raft-cas-register    {:client    (raft-cas-register-client nil nil)
+                          :generator (->> (gen/mix [{:type :invoke, :f :read}
+                                                    {:type :invoke, :f :write, :value (rand-int 5)}
+                                                    {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
+                                          gen/each
+                                          (gen/stagger 0.5))
+                          :checker   (checker/linearizable)
+                          :model     (model/cas-register 0)}
+   :id-gen-ids           {:client    (id-gen-id-client nil nil)
+                          :generator {:type :invoke, :f :generate}
+                          :checker   (checker/unique-ids)}})
 
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
@@ -626,6 +693,7 @@
             :db         (db)
             :client     client
             :nemesis    (nemesis/partition-majorities-ring)
+            ;:nemesis    nemesis/noop
             :generator  generator
             :checker    (checker/compose
                           {:perf     (checker/perf)
