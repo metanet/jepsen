@@ -304,6 +304,7 @@
 
      (invoke! [this test op]
        (try
+          (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
           (case (:f op)
             :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
                       (assoc op :type :ok)
@@ -353,8 +354,7 @@
              ; peer available, and that the message was never sent.
              #"Packet is not send to owner address"
              (assoc op :type :fail, :error :client-down)
-             (throw e)))
-         ))
+             (throw e)))))
 
      (teardown! [this test]
        (.shutdown conn)))))
@@ -525,7 +525,6 @@
   (toString [this] (str "owner: " owner ", lockCount: " lockCount)))
 
 
-
 (defn createInitialReentrantMutex []
   "A single reentrant mutex responding to :acquire and :release messages"
   (ReentrantMutex. nil 0))
@@ -533,24 +532,21 @@
 
 
 
-(declare createCustomMutex)
 
 (defrecord CustomMutex [owner]
   Model
   (step [this op]
-    (if (nil? (:value op))
-      (knossos.model/inconsistent "no owner!")
+    (if (nil? (getNode op))
+      (do
+        (info "no owner!")
+        (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
         :acquire (if (nil? owner)
-                   (createCustomMutex this (:value op) op)
-                   (do
-                     (info (str "cannot acquire owner: " owner " op: " op " this model hash: " (System/identityHashCode this)))
-                     (knossos.model/inconsistent "cannot acquire")))
-        :release (if (or (nil? owner) (not= owner (:value op)))
-                   (do
-                     (info (str "cannot release owner: " owner " op: " op " this model hash: " (System/identityHashCode this)))
-                     (knossos.model/inconsistent "cannot release"))
-                   (createCustomMutex this nil op)
+                   (CustomMutex. (getNode op))
+                   (knossos.model/inconsistent "cannot acquire"))
+        :release (if (or (nil? owner) (not= owner (getNode op)))
+                   (knossos.model/inconsistent "cannot release")
+                   (CustomMutex. nil)
                    ))))
 
   Object
@@ -558,22 +554,8 @@
 
 (defn createEmptyCustomMutex []
   "A single reentrant mutex responding to :acquire and :release messages"
-  (let [
-        initial (CustomMutex. nil)
-        _ (info (str "initial model: " (System/identityHashCode initial)))
-        ]
-    initial)
-  )
+  (CustomMutex. nil))
 
-(defn createCustomMutex [prev owner op]
-  "A single reentrant mutex responding to :acquire and :release messages"
-  (
-    let [
-         newModel (CustomMutex. owner)
-         _ (info (str "owner: " owner ", op: " op " new hash: " (System/identityHashCode newModel) " prev hash:" (System/identityHashCode prev)))
-         ]
-    newModel)
-  )
 
 (defn workloads
   "The workloads we can run. Each workload is a map like
@@ -609,22 +591,19 @@
                           :checker   (checker/linearizable)
                           :model     (model/mutex)}
    :raft-lock            {:client    (raft-lock-client)
-                          :generator (->> [{:type :invoke, :f :acquire}
-                                           {:type :invoke, :f :release}]
+                          :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                           cycle
                                           gen/seq
                                           gen/each
                                           (gen/stagger 1/10))
                           :checker   (checker/linearizable)
-                          :model     (model/mutex)}
+                          :model     (createEmptyCustomMutex)}
    :raft-reentrant-lock  {:client    (raft-reentrant-lock-client)
                           :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                            {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
-                                           ;(gen/sleep 1)
                                            {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
-                                           (gen/sleep 1)
-                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
-                                           (gen/sleep 1)]
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                           cycle
                                           gen/seq
                                           gen/each
