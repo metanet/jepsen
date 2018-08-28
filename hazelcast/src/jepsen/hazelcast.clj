@@ -601,6 +601,39 @@
   (FencedMutex. nil -1))
 
 
+
+
+(defrecord ReentrantFencedMutex [owner fence lockCount]
+  Model
+  (step [this op]
+    (if (nil? (getNode2 op))
+      (do
+        (info "no owner!")
+        (knossos.model/inconsistent "no owner!"))
+      (condp = (:f op)
+        :acquire (cond
+                   (nil? owner) (ReentrantFencedMutex. (getNode2 op) (getFence op) 1)
+                   (or (not= owner (getNode2 op)) (= lockCount 2)) (knossos.model/inconsistent (str "cannot acquire 1! current: " this " op: " op))
+                   (= fence -1) (ReentrantFencedMutex. (getNode2 op) (getFence op) 2)
+                   (or (= (getFence op) -1) (= (getFence op) fence)) (ReentrantFencedMutex. (getNode2 op) fence 2)
+                   :else (knossos.model/inconsistent (str "cannot acquire 2! current: " this " op: " op)))
+        :release (if (or (nil? owner) (not= owner (getNode op)))
+                   (knossos.model/inconsistent (str "cannot release! current: " this " op: " op))
+                   (ReentrantFencedMutex. (if (= lockCount 1) nil owner) fence (- lockCount 1))
+                   ))))
+
+  Object
+  (toString [this] (str "owner: " owner " fence: " fence " lock count: " lockCount)))
+
+
+(defn createInitialReentrantFencedMutex []
+  "A reentrant fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
+  (ReentrantFencedMutex. nil -1 0))
+
+
+
+
+
 (defn workloads
   "The workloads we can run. Each workload is a map like
 
@@ -663,6 +696,17 @@
                                           (gen/stagger 1/10))
                           :checker   (checker/linearizable)
                           :model     (createInitialFencedMutex)}
+   :raft-reentrant-fenced-lock     {:client    (raft-fenced-lock-client)
+                          :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
+                                           {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
+                                          cycle
+                                          gen/seq
+                                          gen/each
+                                          (gen/stagger 1/10))
+                          :checker   (checker/linearizable)
+                          :model     (createInitialReentrantFencedMutex)}
    :queue                (assoc (queue-client-and-gens)
                            :checker (checker/total-queue))
    :atomic-ref-ids       {:client    (atomic-ref-id-client nil nil)
