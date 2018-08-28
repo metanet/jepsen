@@ -369,9 +369,10 @@
 
      (invoke! [this test op]
        (try
+         (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
          (case (:f op)
            :acquire (if (not= 0 (.tryLock lock 5000 TimeUnit/MILLISECONDS))
-                     (assoc op :type :ok)
+                      (assoc op :type :ok :value {:node (.getName conn) :fence (.getFence lock)} )
                      (assoc op :type :fail))
            :release (do (.unlock lock)
                        (assoc op :type :ok)))
@@ -505,6 +506,11 @@
 (defn getNode [op]
   (get (invocations) (:value op)))
 
+
+
+
+
+
 (defrecord ReentrantMutex [owner lockCount]
   Model
   (step [this op]
@@ -552,9 +558,47 @@
   Object
   (toString [this] (str "owner: " owner)))
 
-(defn createEmptyCustomMutex []
-  "A single reentrant mutex responding to :acquire and :release messages"
+(defn createInitialCustomMutex []
+  "A single non-reentrant mutex responding to :acquire and :release messages and tracking mutex holder"
   (CustomMutex. nil))
+
+
+
+
+
+(defn getNode2 [op]
+  (let [val (:value op)]
+    (if (map? val) (:node val) (getNode op))))
+
+(defn getFence [op]
+  (let [val (:value op)]
+    (if (map? val) (:fence val) -1)))
+
+(defrecord FencedMutex [owner fence]
+  Model
+  (step [this op]
+    (if (nil? (getNode2 op))
+      (do
+        (info "no owner!")
+        (knossos.model/inconsistent "no owner!"))
+      (condp = (:f op)
+        :acquire (cond
+                   (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op))
+                   (= (getFence op) -1) (FencedMutex. (getNode2 op) fence)
+                   (> (getFence op) fence) (FencedMutex. (getNode2 op) (getFence op))
+                   :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op)))
+        :release (if (or (nil? owner) (not= owner (getNode op)))
+                   (knossos.model/inconsistent (str "cannot release! current: " this " op: " op))
+                   (FencedMutex. nil fence)
+                   ))))
+
+  Object
+  (toString [this] (str "owner: " owner " fence: " fence)))
+
+
+(defn createInitialFencedMutex []
+  "A fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
+  (FencedMutex. nil -1))
 
 
 (defn workloads
@@ -598,7 +642,7 @@
                                           gen/each
                                           (gen/stagger 1/10))
                           :checker   (checker/linearizable)
-                          :model     (createEmptyCustomMutex)}
+                          :model     (createInitialCustomMutex)}
    :raft-reentrant-lock  {:client    (raft-reentrant-lock-client)
                           :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                            {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
@@ -611,14 +655,14 @@
                           :checker   (checker/linearizable)
                           :model     (createInitialReentrantMutex)}
    :raft-fenced-lock     {:client    (raft-fenced-lock-client)
-                          :generator (->> [{:type :invoke, :f :acquire}
-                                           {:type :invoke, :f :release}]
+                          :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
+                                           {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                           cycle
                                           gen/seq
                                           gen/each
                                           (gen/stagger 1/10))
                           :checker   (checker/linearizable)
-                          :model     (model/mutex)}
+                          :model     (createInitialFencedMutex)}
    :queue                (assoc (queue-client-and-gens)
                            :checker (checker/total-queue))
    :atomic-ref-ids       {:client    (atomic-ref-id-client nil nil)
