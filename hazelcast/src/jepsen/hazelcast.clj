@@ -379,7 +379,6 @@
                         (assoc op :type :ok :value {:node (.getName conn) :fence (.getFence lock)} )
                         )
                      (do
-                       (warn (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op " FAIL!"))
                        (info (str "_" (.getName conn) "_acquire_fail"))
                        (try (Thread/sleep 500) (catch Exception e))
                        (assoc op :type :fail)
@@ -406,14 +405,12 @@
                (assoc op :type :fail, :error :client-down))
 
              (do
-               (warn (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op " exception: " (.getMessage e)))
-               (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe")))
+               (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe exception: " (.getMessage e))))
                (try (Thread/sleep 10000) (catch Exception e))
                (assoc op :type :info, :error :io-exception))))
          (catch Exception e
 
-           (warn (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op " exception: " (.getMessage e)))
-           (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe")))
+           (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe exception: " (.getMessage e))))
            (try (Thread/sleep 10000) (catch Exception e))
            (assoc op :type :info, :error :exception))))
 
