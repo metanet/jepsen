@@ -405,12 +405,12 @@
                (assoc op :type :fail, :error :client-down))
 
              (do
-               (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe exception: " (.getMessage e))))
+               (warn (str "_" (.getName conn) "_" (case (:f op) :acquire (str "acquire_maybe exception: " (.getMessage e)) :release (str "release_maybe exception: " (.getMessage e)))))
                (try (Thread/sleep 10000) (catch Exception e))
                (assoc op :type :info, :error :io-exception))))
          (catch Exception e
 
-           (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe exception: " (.getMessage e))))
+           (warn (str "_" (.getName conn) "_" (case (:f op) :acquire (str "acquire_maybe exception: " (.getMessage e)) :release "release_maybe exception: " (.getMessage e))))
            (try (Thread/sleep 10000) (catch Exception e))
            (assoc op :type :info, :error :exception))))
 
