@@ -27,7 +27,8 @@
            (com.hazelcast.client HazelcastClient)
            (com.hazelcast.core HazelcastInstance)
            (knossos.model Model)
-           (java.util UUID)))
+           (java.util UUID)
+           (java.io IOException)))
 
 (def local-server-dir
   "Relative path to local server project directory"
@@ -311,10 +312,10 @@
                       (assoc op :type :fail))
             :release (do (.unlock lock)
                         (assoc op :type :ok)))
-        (catch java.lang.IllegalMonitorStateException e
+        (catch IllegalMonitorStateException e
           (Thread/sleep 1000)
           (assoc op :type :fail, :error :not-lock-owner))
-        (catch java.io.IOException e
+        (catch IOException e
           (Thread/sleep 1000)
           (condp re-find (.getMessage e)
             ; This indicates that the Hazelcast client doesn't have a remote
@@ -344,11 +345,11 @@
                       (assoc op :type :fail))
            :release (do (.unlock lock)
                         (assoc op :type :ok)))
-         (catch java.lang.IllegalMonitorStateException e
+         (catch IllegalMonitorStateException e
            (assoc op :type :fail, :error :not-lock-owner))
          (catch com.hazelcast.core.OperationTimeoutException e
            (assoc op :type :info, :error :op-timeout))
-         (catch java.io.IOException e
+         (catch IOException e
            (condp re-find (.getMessage e)
              ; This indicates that the Hazelcast client doesn't have a remote
              ; peer available, and that the message was never sent.
@@ -372,22 +373,49 @@
          (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
          (case (:f op)
            :acquire (if (not= 0 (.tryLock lock 5000 TimeUnit/MILLISECONDS))
-                      (assoc op :type :ok :value {:node (.getName conn) :fence (.getFence lock)} )
-                     (assoc op :type :fail))
-           :release (do (.unlock lock)
-                       (assoc op :type :ok)))
-         (catch java.lang.IllegalMonitorStateException e
-           (Thread/sleep 1000)
+                      (do
+                        (info (str "_" (.getName conn) "_acquire_ok"))
+                        (try (Thread/sleep 500) (catch Exception e))
+                        (assoc op :type :ok :value {:node (.getName conn) :fence (.getFence lock)} )
+                        )
+                     (do
+                       (warn (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op " FAIL!"))
+                       (info (str "_" (.getName conn) "_acquire_fail"))
+                       (try (Thread/sleep 500) (catch Exception e))
+                       (assoc op :type :fail)
+                       ))
+           :release (do
+                      (.unlock lock)
+                      (info (str "_" (.getName conn) "_release_ok"))
+                      (assoc op :type :ok)))
+         (catch IllegalMonitorStateException e
+
+           (try (Thread/sleep 1000) (catch Exception e))
+
+           (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_fail" :release "release_fail")))
            (assoc op :type :fail, :error :not-lock-owner))
-         (catch java.io.IOException e
-           (Thread/sleep 1000)
+         (catch IOException e
+
            (condp re-find (.getMessage e)
              ; This indicates that the Hazelcast client doesn't have a remote
              ; peer available, and that the message was never sent.
              #"Packet is not send to owner address"
-             (assoc op :type :fail, :error :client-down)
+             (do
+               (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_fail" :release "release_fail")))
+               (try (Thread/sleep 10000) (catch Exception e))
+               (assoc op :type :fail, :error :client-down))
 
-             (throw e)))))
+             (do
+               (warn (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op " exception: " (.getMessage e)))
+               (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe")))
+               (try (Thread/sleep 10000) (catch Exception e))
+               (assoc op :type :info, :error :io-exception))))
+         (catch Exception e
+
+           (warn (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op " exception: " (.getMessage e)))
+           (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_maybe" :release "release_maybe")))
+           (try (Thread/sleep 10000) (catch Exception e))
+           (assoc op :type :info, :error :exception))))
 
      (teardown! [this test]
        (.shutdown conn)))))
@@ -411,13 +439,13 @@
         (catch com.hazelcast.quorum.QuorumException e
           (Thread/sleep 1000)
           (assoc op :type :fail, :error :quorum))
-        (catch java.lang.IllegalMonitorStateException e
+        (catch IllegalMonitorStateException e
           (Thread/sleep 1000)
           (if (re-find #"Current thread is not owner of the lock!"
                        (.getMessage e))
             (assoc op :type :fail, :error :not-lock-owner)
             (throw e)))
-        (catch java.io.IOException e
+        (catch IOException e
           (Thread/sleep 1000)
           (condp re-find (.getMessage e)
             ; This indicates that the Hazelcast client doesn't have a remote
@@ -574,7 +602,7 @@
   (let [val (:value op)]
     (if (map? val) (:fence val) -1)))
 
-(defrecord FencedMutex [owner fence]
+(defrecord FencedMutex [owner lockFence]
   Model
   (step [this op]
     (if (nil? (getNode2 op))
@@ -583,17 +611,17 @@
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
         :acquire (cond
-                   (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op))
-                   (= (getFence op) -1) (FencedMutex. (getNode2 op) fence)
-                   (> (getFence op) fence) (FencedMutex. (getNode2 op) (getFence op))
-                   :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op)))
+                   (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op)))
+                   (= (getFence op) -1) (FencedMutex. (getNode2 op) lockFence)
+                   (> (getFence op) lockFence) (FencedMutex. (getNode2 op) (getFence op))
+                   :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op))))
         :release (if (or (nil? owner) (not= owner (getNode op)))
-                   (knossos.model/inconsistent (str "cannot release! current: " this " op: " op))
-                   (FencedMutex. nil fence)
+                   (knossos.model/inconsistent (str "cannot release! current: " this " op: " op " node: " (getNode op)))
+                   (FencedMutex. nil lockFence)
                    ))))
 
   Object
-  (toString [this] (str "owner: " owner " fence: " fence)))
+  (toString [this] (str "owner: " owner " lock fence: " lockFence)))
 
 
 (defn createInitialFencedMutex []
@@ -603,7 +631,7 @@
 
 
 
-(defrecord ReentrantFencedMutex [owner fence lockCount]
+(defrecord ReentrantFencedMutex [owner lockCount lockFence highestObservedFence]
   Model
   (step [this op]
     (if (nil? (getNode2 op))
@@ -612,23 +640,33 @@
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
         :acquire (cond
-                   (nil? owner) (ReentrantFencedMutex. (getNode2 op) (getFence op) 1)
-                   (or (not= owner (getNode2 op)) (= lockCount 2)) (knossos.model/inconsistent (str "cannot acquire 1! current: " this " op: " op))
-                   (= fence -1) (ReentrantFencedMutex. (getNode2 op) (getFence op) 2)
-                   (or (= (getFence op) -1) (= (getFence op) fence)) (ReentrantFencedMutex. (getNode2 op) fence 2)
-                   :else (knossos.model/inconsistent (str "cannot acquire 2! current: " this " op: " op)))
+                   ; if the lock is not held, I can have an invalid fence or a fence larger than highestObservedFence
+                   (nil? owner) (cond (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
+                                            (ReentrantFencedMutex. (getNode2 op) 1 (getFence op) (max (getFence op) highestObservedFence))
+                                      :else
+                                            (knossos.model/inconsistent (str "cannot acquire 1! current: " this " op: " op " node: " (getNode2 op))))
+                   ; if the new acquire does not match to the current lock owner, or the lock is already acquired twice, we cannot acquire anymore
+                   (or (not= owner (getNode2 op)) (= lockCount 2)) (knossos.model/inconsistent (str "cannot acquire 2! current: " this " op: " op " node: " (getNode2 op)))
+                   ; if the lock is acquired without a fence, and the new acquire has no fence or a fence larger than highestObservedFence
+                   (= lockFence -1) (cond (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
+                                                (ReentrantFencedMutex. (getNode2 op) 2 (getFence op) (max (getFence op) highestObservedFence))
+                                          :else
+                                                (knossos.model/inconsistent (str "cannot acquire 3! current: " this " op: " op)))
+                   ; if the lock is acquired with a fence, and the new acquire has no fence or the same fence
+                   (or (= (getFence op) -1) (= (getFence op) lockFence)) (ReentrantFencedMutex. (getNode2 op) 2 lockFence highestObservedFence)
+                   :else (knossos.model/inconsistent (str "cannot acquire 4! current: " this " op: " op)))
         :release (if (or (nil? owner) (not= owner (getNode op)))
                    (knossos.model/inconsistent (str "cannot release! current: " this " op: " op))
-                   (ReentrantFencedMutex. (if (= lockCount 1) nil owner) fence (- lockCount 1))
-                   ))))
+                   (cond (= lockCount 1) (ReentrantFencedMutex. nil 0 -1 highestObservedFence)
+                         :else (ReentrantFencedMutex. owner 1 lockFence highestObservedFence))))))
 
   Object
-  (toString [this] (str "owner: " owner " fence: " fence " lock count: " lockCount)))
+  (toString [this] (str "owner: " owner " lock count: " lockCount " lock fence: " lockFence " highest observed fence: " highestObservedFence)))
 
 
 (defn createInitialReentrantFencedMutex []
   "A reentrant fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
-  (ReentrantFencedMutex. nil -1 0))
+  (ReentrantFencedMutex. nil 0 -1 -1))
 
 
 
@@ -742,7 +780,7 @@
                 checker
                 model]} (get (workloads) (:workload opts))
         generator (->> generator
-                       (gen/nemesis (gen/start-stop 15 15))
+                       (gen/nemesis (gen/start-stop 20 20))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not final-generator
                     generator
