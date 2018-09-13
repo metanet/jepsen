@@ -599,7 +599,7 @@
   (let [val (:value op)]
     (if (map? val) (:fence val) -1)))
 
-(defrecord FencedMutex [owner lockFence]
+(defrecord FencedMutex [owner lockFence prevOwner]
   Model
   (step [this op]
     (if (nil? (getNode2 op))
@@ -609,12 +609,15 @@
       (condp = (:f op)
         :acquire (cond
                    (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op)))
-                   (= (getFence op) -1) (FencedMutex. (getNode2 op) lockFence)
-                   (> (getFence op) lockFence) (FencedMutex. (getNode2 op) (getFence op))
+                   (= (getFence op) -1) (FencedMutex. (getNode2 op) lockFence owner)
+                   (> (getFence op) lockFence) (FencedMutex. (getNode2 op) (getFence op) owner)
+                   (and (= (getFence op) lockFence) (= (getNode2 op) prevOwner)) (do
+                                                                               (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner))
+                                                                               (FencedMutex. (getNode2 op) (getFence op) prevOwner))
                    :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op))))
         :release (if (or (nil? owner) (not= owner (getNode op)))
                    (knossos.model/inconsistent (str "cannot release! current: " this " op: " op " node: " (getNode op)))
-                   (FencedMutex. nil lockFence)
+                   (FencedMutex. nil lockFence owner)
                    ))))
 
   Object
@@ -623,7 +626,7 @@
 
 (defn createInitialFencedMutex []
   "A fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
-  (FencedMutex. nil -1))
+  (FencedMutex. nil -1 nil))
 
 
 
