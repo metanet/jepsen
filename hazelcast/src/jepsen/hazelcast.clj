@@ -611,9 +611,7 @@
                    (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op)))
                    (= (getFence op) -1) (FencedMutex. (getNode2 op) lockFence owner)
                    (> (getFence op) lockFence) (FencedMutex. (getNode2 op) (getFence op) owner)
-                   (and (= (getFence op) lockFence) (= (getNode2 op) prevOwner)) (do
-                                                                               (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner))
-                                                                               (FencedMutex. (getNode2 op) (getFence op) prevOwner))
+                   (and (= (getFence op) lockFence) (= (getNode2 op) prevOwner)) (do (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner)) this)
                    :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op))))
         :release (if (or (nil? owner) (not= owner (getNode op)))
                    (knossos.model/inconsistent (str "cannot release! current: " this " op: " op " node: " (getNode op)))
@@ -631,7 +629,7 @@
 
 
 
-(defrecord ReentrantFencedMutex [owner lockCount lockFence highestObservedFence]
+(defrecord ReentrantFencedMutex [owner lockCount currentFence highestObservedFence highestObservedFenceOwner]
   Model
   (step [this op]
     (if (nil? (getNode2 op))
@@ -640,25 +638,33 @@
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
         :acquire (cond
-                   ; if the lock is not held, I can have an invalid fence or a fence larger than highestObservedFence
-                   (nil? owner) (cond (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
-                                            (ReentrantFencedMutex. (getNode2 op) 1 (getFence op) (max (getFence op) highestObservedFence))
-                                      :else
-                                            (knossos.model/inconsistent (str "cannot acquire 1! current: " this " op: " op " node: " (getNode2 op))))
+                   ; if the lock is not held
+                   (nil? owner) (cond
+                                  ; I can have an invalid fence or a fence larger than highestObservedFence
+                                  (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
+                                    (ReentrantFencedMutex. (getNode2 op) 1 (getFence op) (max (getFence op) highestObservedFence) highestObservedFenceOwner)
+                                  ; I was the previous lock owner, I acquired the lock and got the same fence
+                                  ; with the previous one, probably because I encountered operation timeout
+                                  ; and didn't release the lock
+                                  (and (= (getFence op) highestObservedFence) (= (getNode2 op) highestObservedFenceOwner))
+                                    (do (info (str "suspicious new fence: " highestObservedFence " for same owner: " highestObservedFenceOwner))
+                                        (ReentrantFencedMutex. (getNode2 op) 1 (getFence op) highestObservedFence highestObservedFenceOwner))
+                                  :else
+                                    (knossos.model/inconsistent (str "cannot acquire 1! current: " this " op: " op " node: " (getNode2 op))))
                    ; if the new acquire does not match to the current lock owner, or the lock is already acquired twice, we cannot acquire anymore
                    (or (not= owner (getNode2 op)) (= lockCount 2)) (knossos.model/inconsistent (str "cannot acquire 2! current: " this " op: " op " node: " (getNode2 op)))
                    ; if the lock is acquired without a fence, and the new acquire has no fence or a fence larger than highestObservedFence
-                   (= lockFence -1) (cond (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
-                                                (ReentrantFencedMutex. (getNode2 op) 2 (getFence op) (max (getFence op) highestObservedFence))
+                   (= currentFence -1) (cond (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
+                                                (ReentrantFencedMutex. (getNode2 op) 2 (getFence op) (max (getFence op) highestObservedFence) highestObservedFenceOwner)
                                           :else
                                                 (knossos.model/inconsistent (str "cannot acquire 3! current: " this " op: " op)))
                    ; if the lock is acquired with a fence, and the new acquire has no fence or the same fence
-                   (or (= (getFence op) -1) (= (getFence op) lockFence)) (ReentrantFencedMutex. (getNode2 op) 2 lockFence highestObservedFence)
+                   (or (= (getFence op) -1) (= (getFence op) currentFence)) (ReentrantFencedMutex. (getNode2 op) 2 currentFence highestObservedFence highestObservedFenceOwner)
                    :else (knossos.model/inconsistent (str "cannot acquire 4! current: " this " op: " op)))
         :release (if (or (nil? owner) (not= owner (getNode op)))
                    (knossos.model/inconsistent (str "cannot release! current: " this " op: " op))
-                   (cond (= lockCount 1) (ReentrantFencedMutex. nil 0 -1 highestObservedFence)
-                         :else (ReentrantFencedMutex. owner 1 lockFence highestObservedFence))))))
+                   (cond (= lockCount 1) (ReentrantFencedMutex. nil 0 -1 highestObservedFence owner)
+                         :else (ReentrantFencedMutex. owner 1 currentFence highestObservedFence highestObservedFenceOwner))))))
 
   Object
   (toString [this] (str "owner: " owner " lock count: " lockCount " lock fence: " lockFence " highest observed fence: " highestObservedFence)))
@@ -666,7 +672,7 @@
 
 (defn createInitialReentrantFencedMutex []
   "A reentrant fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
-  (ReentrantFencedMutex. nil 0 -1 -1))
+  (ReentrantFencedMutex. nil 0 -1 -1 nil))
 
 
 
