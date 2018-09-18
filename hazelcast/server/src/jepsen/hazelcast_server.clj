@@ -3,11 +3,15 @@
   (:require [clojure.tools.cli :as cli]
             [clojure.tools.logging :refer :all]
             [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.string :as str]
+            [clojure.string :as str]
             [clojure.string :as str])
   (:import (com.hazelcast.core Hazelcast)
            (com.hazelcast.config.raft RaftConfig
                                       RaftAlgorithmConfig
-                                      RaftMetadataGroupConfig)
+                                      RaftMetadataGroupConfig
+                                      RaftSemaphoreConfig)
            (com.hazelcast.config Config
                                  LockConfig
                                  MapConfig
@@ -16,7 +20,7 @@
 (def opt-spec
   [["-m" "--members MEMBER-LIST" "Comma-separated list of peers to connect to"
     :parse-fn (fn [m]
-                (str/split m #"\s*,\s*"))]])
+                  (str/split m #"\s*,\s*"))]])
 
 (defn prepareRaftConfig
   "Prepare Hazelcast RaftConfig"
@@ -37,7 +41,8 @@
         _ (.setRaftAlgorithmConfig raftConfig raftAlgorithmConfig)
         _ (.setMetadataGroupConfig raftConfig metadataConfig)
         _ (.setSessionHeartbeatIntervalMillis raftConfig 1000)
-        _ (.setSessionTimeToLiveSeconds raftConfig 60)
+        _ (.setSessionTimeToLiveSeconds raftConfig 300)
+
       ]
     raftConfig))
 
@@ -52,7 +57,7 @@
         members (:members options)
 
         ; Timeouts
-        _ (.setProperty config "hazelcast.client.max.no.heartbeat.seconds" "5")
+        _ (.setProperty config "hazelcast.client.max.no.heartbeat.seconds" "90")
         _ (.setProperty config "hazelcast.heartbeat.interval.seconds" "1")
         _ (.setProperty config "hazelcast.max.no.heartbeat.seconds" "5")
         _ (.setProperty config "hazelcast.operation.call.timeout.millis" "5000")
@@ -107,6 +112,13 @@
                      (.setName "jepsen.map")
                      (.setQuorumName "majority"))
         _ (.addMapConfig config map-config)
+
+        ; Raft session-aware semaphore config
+        raftSessionAwareSemaphoreConfig (RaftSemaphoreConfig.)
+        _ (.setStrictModeEnabled raftSessionAwareSemaphoreConfig true)
+        _ (.setName raftSessionAwareSemaphoreConfig "jepsen.raft-session-aware-semaphore")
+        _ (.setRaftGroupRef raftSessionAwareSemaphoreConfig "default")
+        _ (.addRaftSemaphoreConfig config raftSessionAwareSemaphoreConfig)
 
         ; Launch
         hc      (Hazelcast/newHazelcastInstance config)]
