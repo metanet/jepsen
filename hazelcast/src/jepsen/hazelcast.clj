@@ -51,9 +51,8 @@
 (def pid-file (str dir "/server.pid"))
 (def log-file (str dir "/server.log"))
 
-(def nodeIdMark "xxxxxxxxxx")
-
-(def TOTAL_PERMITS 2)
+(def CLIENT_ID_SEPARATOR "xxxxxxxxxx")
+(def NUMBER_OF_PERMITS 2)
 
 (defn build-server!
   "Ensures the server jar is ready"
@@ -309,13 +308,13 @@
 
      (invoke! [this test op]
        (try
-          (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
+          (info (str " " CLIENT_ID_SEPARATOR " " (.getName conn) " " CLIENT_ID_SEPARATOR " " op))
           (case (:f op)
             :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                      (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})
+                      (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})
                       (assoc op :type :fail))
             :release (do (.unlock lock)
-                        (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})))
+                        (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})))
         (catch IllegalMonitorStateException e
           (Thread/sleep 1000)
           (assoc op :type :fail, :error :not-lock-owner))
@@ -342,13 +341,13 @@
 
      (invoke! [this test op]
        (try
-         (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
+         (info (str " " CLIENT_ID_SEPARATOR " " (.getName conn) " " CLIENT_ID_SEPARATOR " " op))
          (case (:f op)
            :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                      (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})
+                      (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})
                       (assoc op :type :fail))
            :release (do (.unlock lock)
-                        (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})))
+                        (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})))
          (catch IllegalMonitorStateException e
            (assoc op :type :fail, :error :not-lock-owner))
          (catch com.hazelcast.core.OperationTimeoutException e
@@ -374,13 +373,13 @@
 
      (invoke! [this test op]
        (try
-         (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
+         (info (str " " CLIENT_ID_SEPARATOR " " (.getName conn) " " CLIENT_ID_SEPARATOR " " op))
          (case (:f op)
            :acquire (if (not= 0 (.tryLock lock 5000 TimeUnit/MILLISECONDS))
                       (do
                         (info (str "_" (.getName conn) "_acquire_ok"))
                         (try (Thread/sleep 500) (catch Exception _))
-                        (assoc op :type :ok :value {:node (.getName conn) :fence (.getFence lock) :uid (:value op)})
+                        (assoc op :type :ok :value {:client (.getName conn) :fence (.getFence lock) :uid (:value op)})
                         )
                      (do
                        (info (str "_" (.getName conn) "_acquire_fail"))
@@ -390,7 +389,7 @@
            :release (do
                       (.unlock lock)
                       (info (str "_" (.getName conn) "_release_ok"))
-                      (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})))
+                      (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})))
          (catch IllegalMonitorStateException e
 
            (try (Thread/sleep 1000) (catch Exception _))
@@ -428,34 +427,34 @@
      (setup! [_ test node]
        (let [conn (connect node)
              sem (RaftSessionAwareSemaphoreProxy/create conn "jepsen.raft-session-aware-semaphore")
-             _ (.init sem TOTAL_PERMITS)]
+             _ (.init sem NUMBER_OF_PERMITS)]
          (raft-session-aware-semaphore-client conn sem)))
 
      (invoke! [this test op]
        (try
-         (info (str " " nodeIdMark " " (.getName conn) " " nodeIdMark " " op))
+         (info (str " " CLIENT_ID_SEPARATOR " " (.getName conn) " " CLIENT_ID_SEPARATOR " " op))
          (case (:f op)
            :acquire (if (.tryAcquire semaphore 5000 TimeUnit/MILLISECONDS)
                       (do
                         (info (str "_" (.getName conn) "_acquire_ok"))
                         (try (Thread/sleep 500) (catch Exception _))
-                        (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})
+                        (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})
                         )
                       (do
                         (info (str "_" (.getName conn) "_acquire_fail"))
                         (try (Thread/sleep 500) (catch Exception _))
-                        (assoc op :type :fail :debug {:node (.getName conn) :uid (:value op)})
+                        (assoc op :type :fail :debug {:client (.getName conn) :uid (:value op)})
                         ))
            :release (do
                       (.release semaphore)
                       (info (str "_" (.getName conn) "_release_ok"))
-                      (assoc op :type :ok :value {:node (.getName conn) :uid (:value op)})))
+                      (assoc op :type :ok :value {:client (.getName conn) :uid (:value op)})))
          (catch IllegalArgumentException e
 
            (try (Thread/sleep 1000) (catch Exception _))
 
            (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_fail" :release "release_fail")))
-           (assoc op :type :fail :error :not-permit-owner :debug {:node (.getName conn) :uid (:value op)}))
+           (assoc op :type :fail :error :not-permit-owner :debug {:client (.getName conn) :uid (:value op)}))
          (catch IOException e
 
            (condp re-find (.getMessage e)
@@ -465,17 +464,17 @@
              (do
                (warn (str "_" (.getName conn) "_" (case (:f op) :acquire "acquire_fail" :release "release_fail")))
                (try (Thread/sleep 1000) (catch Exception _))
-               (assoc op :type :fail :error :client-down :debug {:node (.getName conn) :uid (:value op)}))
+               (assoc op :type :fail :error :client-down :debug {:client (.getName conn) :uid (:value op)}))
 
              (do
                (warn (str "_" (.getName conn) "_" (case (:f op) :acquire (str "acquire_maybe exception: " (.getMessage e)) :release (str "release_maybe exception: " (.getMessage e)))))
                (try (Thread/sleep 1000) (catch Exception _))
-               (assoc op :type :info :error :io-exception :debug {:node (.getName conn) :uid (:value op)}))))
+               (assoc op :type :info :error :io-exception :debug {:client (.getName conn) :uid (:value op)}))))
          (catch Exception e
 
            (warn (str "_" (.getName conn) "_" (case (:f op) :acquire (str "acquire_maybe exception: " (.getMessage e)) :release "release_maybe exception: " (.getMessage e))))
            (try (Thread/sleep 1000) (catch Exception _))
-           (assoc op :type :info :error :exception :debug {:node (.getName conn) :uid (:value op)}))))
+           (assoc op :type :info :error :exception :debug {:client (.getName conn) :uid (:value op)}))))
 
      (teardown! [this test]
        (.shutdown conn)))))
@@ -582,41 +581,41 @@
    :checker   (checker/set)})
 
 
+
 (defn parseLine [line]
   (let
-    [ tokens (.split line nodeIdMark) ]
+    [ tokens (.split line CLIENT_ID_SEPARATOR) ]
     [ (:value (clojure.edn/read-string (nth tokens 2))) (.trim (nth tokens 1)) ]))
 
 (def invocations (memoize (fn []
                             (apply array-map
                                    (flatten
                                      (map parseLine
-                                          (.split (:out (sh "grep" nodeIdMark "store/latest/jepsen.log")) "\n")
+                                          (.split (:out (sh "grep" CLIENT_ID_SEPARATOR "store/latest/jepsen.log")) "\n")
                                      ))))))
 
-(defn getNode [op]
+(defn getClient [op]
   (let [val (:value op)]
-    (if (map? val) (:node val) (get (invocations) (:value op)))))
+    (if (map? val) (:client val) (get (invocations) (:value op)))))
 
 (defrecord ReentrantMutex [owner lockCount]
   Model
   (step [this op]
-    (if (nil? (getNode op))
+    (if (nil? (getClient op))
       (do
         (info "no owner!")
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
-        :acquire (if (and (< lockCount 3) (or (nil? owner) (= owner (getNode op))))
-                   (ReentrantMutex. (getNode op) (+ lockCount 1))
-                   (knossos.model/inconsistent "cannot acquire"))
-        :release (if (or (nil? owner) (not= owner (getNode op)))
-                   (knossos.model/inconsistent "cannot release")
+        :acquire (if (and (< lockCount 3) (or (nil? owner) (= owner (getClient op))))
+                   (ReentrantMutex. (getClient op) (+ lockCount 1))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
+        :release (if (or (nil? owner) (not= owner (getClient op)))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this))
                    (ReentrantMutex. (if (= lockCount 1) nil owner) (- lockCount 1)))))
     )
 
   Object
   (toString [this] (str "owner: " owner ", lockCount: " lockCount)))
-
 
 (defn createInitialReentrantMutex []
   "A single reentrant mutex responding to :acquire and :release messages"
@@ -624,21 +623,19 @@
 
 
 
-
-
 (defrecord CustomMutex [owner]
   Model
   (step [this op]
-    (if (nil? (getNode op))
+    (if (nil? (getClient op))
       (do
         (info "no owner!")
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
         :acquire (if (nil? owner)
-                   (CustomMutex. (getNode op))
-                   (knossos.model/inconsistent "cannot acquire"))
-        :release (if (or (nil? owner) (not= owner (getNode op)))
-                   (knossos.model/inconsistent "cannot release")
+                   (CustomMutex. (getClient op))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
+        :release (if (or (nil? owner) (not= owner (getClient op)))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this))
                    (CustomMutex. nil)
                    ))))
 
@@ -650,6 +647,7 @@
   (CustomMutex. nil))
 
 
+
 (defn getFence [op]
   (let [val (:value op)]
     (if (map? val) (:fence val) -1)))
@@ -657,25 +655,24 @@
 (defrecord FencedMutex [owner lockFence prevOwner]
   Model
   (step [this op]
-    (if (nil? (getNode op))
+    (if (nil? (getClient op))
       (do
         (info "no owner!")
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
         :acquire (cond
-                   (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op)))
-                   (= (getFence op) -1) (FencedMutex. (getNode op) lockFence owner)
-                   (> (getFence op) lockFence) (FencedMutex. (getNode op) (getFence op) owner)
-                   (and (= (getFence op) lockFence) (= (getNode op) prevOwner)) (do (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner)) (FencedMutex. (getNode op) (getFence op) owner))
-                   :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op))))
-        :release (if (or (nil? owner) (not= owner (getNode op)))
-                   (knossos.model/inconsistent (str "cannot release! current: " this " op: " op " node: " (getNode op)))
+                   (some? owner) (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this))
+                   (= (getFence op) -1) (FencedMutex. (getClient op) lockFence owner)
+                   (> (getFence op) lockFence) (FencedMutex. (getClient op) (getFence op) owner)
+                   (and (= (getFence op) lockFence) (= (getClient op) prevOwner)) (do (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner)) (FencedMutex. (getClient op) (getFence op) owner))
+                   :else (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
+        :release (if (or (nil? owner) (not= owner (getClient op)))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this))
                    (FencedMutex. nil lockFence owner)
                    ))))
 
   Object
-  (toString [this] (str "owner: " owner " lock fence: " lockFence)))
-
+  (toString [this] (str "owner: " owner " lock fence: " lockFence " prev owner: " prevOwner)))
 
 (defn createInitialFencedMutex []
   "A fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
@@ -683,11 +680,10 @@
 
 
 
-
 (defrecord ReentrantFencedMutex [owner lockCount currentFence highestObservedFence highestObservedFenceOwner]
   Model
   (step [this op]
-    (if (nil? (getNode op))
+    (if (nil? (getClient op))
       (do
         (info "no owner!")
         (knossos.model/inconsistent "no owner!"))
@@ -697,58 +693,57 @@
                    (nil? owner) (cond
                                   ; I can have an invalid fence or a fence larger than highestObservedFence
                                   (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
-                                    (ReentrantFencedMutex. (getNode op) 1 (getFence op) (max (getFence op) highestObservedFence) highestObservedFenceOwner)
+                                  (ReentrantFencedMutex. (getClient op) 1 (getFence op) (max (getFence op) highestObservedFence) highestObservedFenceOwner)
                                   ; I was the previous lock owner, I acquired the lock and got the same fence
                                   ; with the previous one, probably because I encountered operation timeout
                                   ; and didn't release the lock
-                                  (and (= (getFence op) highestObservedFence) (= (getNode op) highestObservedFenceOwner))
-                                    (do (info (str "suspicious new fence: " highestObservedFence " for same owner: " highestObservedFenceOwner))
-                                        (ReentrantFencedMutex. (getNode op) 1 (getFence op) highestObservedFence highestObservedFenceOwner))
+                                  (and (= (getFence op) highestObservedFence) (= (getClient op) highestObservedFenceOwner))
+                                  (do (info (str "suspicious new fence: " highestObservedFence " for same owner: " highestObservedFenceOwner))
+                                      (ReentrantFencedMutex. (getClient op) 1 (getFence op) highestObservedFence highestObservedFenceOwner))
                                   :else
-                                    (knossos.model/inconsistent (str "cannot acquire 1! current: " this " op: " op " node: " (getNode op))))
+                                  (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
                    ; if the new acquire does not match to the current lock owner, or the lock is already acquired twice, we cannot acquire anymore
-                   (or (not= owner (getNode op)) (= lockCount 2)) (knossos.model/inconsistent (str "cannot acquire 2! current: " this " op: " op " node: " (getNode op)))
+                   (or (not= owner (getClient op)) (= lockCount 2)) (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this))
                    ; if the lock is acquired without a fence, and the new acquire has no fence or a fence larger than highestObservedFence
                    (= currentFence -1) (cond (or (= (getFence op) -1) (> (getFence op) highestObservedFence))
-                                                (ReentrantFencedMutex. (getNode op) 2 (getFence op) (max (getFence op) highestObservedFence) highestObservedFenceOwner)
+                                                (ReentrantFencedMutex. (getClient op) 2 (getFence op) (max (getFence op) highestObservedFence) highestObservedFenceOwner)
                                           :else
-                                                (knossos.model/inconsistent (str "cannot acquire 3! current: " this " op: " op)))
+                                                (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
                    ; if the lock is acquired with a fence, and the new acquire has no fence or the same fence
-                   (or (= (getFence op) -1) (= (getFence op) currentFence)) (ReentrantFencedMutex. (getNode op) 2 currentFence highestObservedFence highestObservedFenceOwner)
-                   :else (knossos.model/inconsistent (str "cannot acquire 4! current: " this " op: " op)))
-        :release (if (or (nil? owner) (not= owner (getNode op)))
-                   (knossos.model/inconsistent (str "cannot release! current: " this " op: " op))
+                   (or (= (getFence op) -1) (= (getFence op) currentFence)) (ReentrantFencedMutex. (getClient op) 2 currentFence highestObservedFence highestObservedFenceOwner)
+                   :else (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
+        :release (if (or (nil? owner) (not= owner (getClient op)))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this))
                    (cond (= lockCount 1) (ReentrantFencedMutex. nil 0 -1 highestObservedFence owner)
                          :else (ReentrantFencedMutex. owner 1 currentFence highestObservedFence highestObservedFenceOwner))))))
 
   Object
-  (toString [this] (str "owner: " owner " lock count: " lockCount " lock fence: " currentFence " highest observed fence: " highestObservedFence)))
-
+  (toString [this] (str "owner: " owner " lock count: " lockCount " lock fence: " currentFence " highest observed fence: " highestObservedFence " highest observed fence owner: " highestObservedFenceOwner)))
 
 (defn createInitialReentrantFencedMutex []
   "A reentrant fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
   (ReentrantFencedMutex. nil 0 -1 -1 nil))
 
 
+
 (defrecord AcquiredPermitsModel [acquired]
   Model
   (step [this op]
-    (if (nil? (getNode op))
+    (if (nil? (getClient op))
       (do
         (info "no owner!")
         (knossos.model/inconsistent "no owner!"))
       (condp = (:f op)
-        :acquire (if (< (reduce + (vals acquired)) TOTAL_PERMITS)
-                   (AcquiredPermitsModel. (assoc acquired (getNode op) (+ (get acquired (getNode op)) 1)))
-                   (knossos.model/inconsistent (str "cannot " op " on " this)))
-        :release (if (> (get acquired (getNode op)) 0)
-                   (AcquiredPermitsModel. (assoc acquired (getNode op) (- (get acquired (getNode op)) 1)))
-                   (knossos.model/inconsistent (str "cannot " op " on " this)))))
+        :acquire (if (< (reduce + (vals acquired)) NUMBER_OF_PERMITS)
+                   (AcquiredPermitsModel. (assoc acquired (getClient op) (+ (get acquired (getClient op)) 1)))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))
+        :release (if (> (get acquired (getClient op)) 0)
+                   (AcquiredPermitsModel. (assoc acquired (getClient op) (- (get acquired (getClient op)) 1)))
+                   (knossos.model/inconsistent (str "client: " (getClient op) " cannot " op " on " this)))))
     )
 
   Object
   (toString [this] (str "acquired: " acquired)))
-
 
 (defn createInitialAcquiredPermitsModel []
   "A model that assign permits to multiple nodes via :acquire and :release messages"
