@@ -666,7 +666,7 @@
                    (some? owner) (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op)))
                    (= (getFence op) -1) (FencedMutex. (getNode op) lockFence owner)
                    (> (getFence op) lockFence) (FencedMutex. (getNode op) (getFence op) owner)
-                   (and (= (getFence op) lockFence) (= (getNode op) prevOwner)) (do (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner)) this)
+                   (and (= (getFence op) lockFence) (= (getNode op) prevOwner)) (do (info (str "suspicious new fence: " lockFence " for same owner: " prevOwner)) (FencedMutex. (getNode op) (getFence op) owner))
                    :else (knossos.model/inconsistent (str "cannot acquire! current: " this " op: " op " node: " (getNode op))))
         :release (if (or (nil? owner) (not= owner (getNode op)))
                    (knossos.model/inconsistent (str "cannot release! current: " this " op: " op " node: " (getNode op)))
