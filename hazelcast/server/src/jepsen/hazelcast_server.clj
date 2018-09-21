@@ -34,7 +34,6 @@
         _ (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 250)
         ; _ (.setFailOnIndeterminateOperationState raftAlgorithmConfig true)
 
-        _ (.setInitialRaftMember metadataConfig true)
         _ (.setGroupSize metadataConfig (count members))
         _ (.setMetadataGroupSize metadataConfig (count members))
 
