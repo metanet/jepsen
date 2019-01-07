@@ -8,42 +8,40 @@
             [clojure.string :as str]
             [clojure.string :as str])
   (:import (com.hazelcast.core Hazelcast)
-           (com.hazelcast.config.raft RaftConfig
-                                      RaftAlgorithmConfig
-                                      RaftMetadataGroupConfig
-                                      RaftSemaphoreConfig)
+           (com.hazelcast.config.cp CPSemaphoreConfig)
            (com.hazelcast.config Config
                                  LockConfig
                                  MapConfig
-                                 QuorumConfig)))
+                                 QuorumConfig)
+           ))
 
 (def opt-spec
   [["-m" "--members MEMBER-LIST" "Comma-separated list of peers to connect to"
     :parse-fn (fn [m]
                   (str/split m #"\s*,\s*"))]])
 
-(defn prepareRaftConfig
-  "Prepare Hazelcast RaftConfig"
-  [members]
-  (let [raftAlgorithmConfig (RaftAlgorithmConfig.)
-        metadataConfig (RaftMetadataGroupConfig.)
-        raftConfig (RaftConfig.)
+(defn prepareCPSubsystemConfig
+  "Prepare Hazelcast CPSubsystemConfig"
+  [config members]
+  (let [cpSubsystemConfig (.getCPSubsystemConfig config)
+        raftAlgorithmConfig (.getRaftAlgorithmConfig cpSubsystemConfig)
+        cpSessionAwareSemaphoreConfig (CPSemaphoreConfig.)
 
         _ (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
         _ (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
         _ (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 250)
-        ; _ (.setFailOnIndeterminateOperationState raftAlgorithmConfig true)
+        _ (.setFailOnIndeterminateOperationState cpSubsystemConfig true)
 
-        _ (.setGroupSize metadataConfig (count members))
-        _ (.setMetadataGroupSize metadataConfig (count members))
+        _ (.setCPMemberCount cpSubsystemConfig (count members))
+        _ (.setSessionHeartbeatIntervalSeconds cpSubsystemConfig 5)
+        _ (.setSessionTimeToLiveSeconds cpSubsystemConfig 300)
 
-        _ (.setRaftAlgorithmConfig raftConfig raftAlgorithmConfig)
-        _ (.setMetadataGroupConfig raftConfig metadataConfig)
-        _ (.setSessionHeartbeatIntervalMillis raftConfig 1000)
-        _ (.setSessionTimeToLiveSeconds raftConfig 300)
+        _ (.setJdkCompatible cpSessionAwareSemaphoreConfig false)
+        _ (.setName cpSessionAwareSemaphoreConfig "jepsen.cpSemaphore")
+        _ (.addCPSemaphoreConfig cpSubsystemConfig cpSessionAwareSemaphoreConfig)
 
       ]
-    raftConfig))
+    cpSubsystemConfig))
 
 (defn -main
   "Go go go"
@@ -72,8 +70,8 @@
                   (.addMember tcp-ip member))
         _       (.setEnabled tcp-ip true)
 
-        ; prepare raft service
-        _ (.setRaftConfig config (prepareRaftConfig members))
+        ; prepare the CP subsystem
+        _ (prepareCPSubsystemConfig config members)
 
         ; Quorum for split-brain protection
         quorum (doto (QuorumConfig.)
@@ -83,7 +81,6 @@
                                        (/ (inc (count (:members options)))
                                           2))))))
         _ (.addQuorumConfig config quorum)
-
 
         ; Locks
         lock-config (doto (LockConfig.)
@@ -98,7 +95,6 @@
                        (.setQuorumName "majority"))
         _ (.addQueueConfig config queue-config)
 
-
         ; Maps with CRDTs
         crdt-map-config (doto (MapConfig.)
                     (.setName "jepsen.crdt-map")
@@ -111,13 +107,6 @@
                      (.setName "jepsen.map")
                      (.setQuorumName "majority"))
         _ (.addMapConfig config map-config)
-
-        ; Raft session-aware semaphore config
-        raftSessionAwareSemaphoreConfig (RaftSemaphoreConfig.)
-        _ (.setStrictModeEnabled raftSessionAwareSemaphoreConfig true)
-        _ (.setName raftSessionAwareSemaphoreConfig "jepsen.raft-session-aware-semaphore")
-        _ (.setRaftGroupRef raftSessionAwareSemaphoreConfig "default")
-        _ (.addRaftSemaphoreConfig config raftSessionAwareSemaphoreConfig)
 
         ; Launch
         hc      (Hazelcast/newHazelcastInstance config)]

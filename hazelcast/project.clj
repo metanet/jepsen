@@ -6,8 +6,7 @@
   ; :repositories [["jitpack" "https://jitpack.io"]]
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [jepsen "0.1.9"]
-                ;  [com.github.mdogan.hazelcast/hazelcast-raft-client "raft-extended-SNAPSHOT"]
-                 [com.hazelcast/hazelcast-raft-client "3.11-SNAPSHOT"]]
+                 [com.hazelcast/hazelcast-client "3.12-SNAPSHOT"]]
   :main jepsen.hazelcast)
 
 ;; To avoid strict TSL check ("Tried to use insecure HTTP repository without TLS").
