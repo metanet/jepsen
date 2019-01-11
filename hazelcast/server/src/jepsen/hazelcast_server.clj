@@ -8,7 +8,7 @@
             [clojure.string :as str]
             [clojure.string :as str])
   (:import (com.hazelcast.core Hazelcast)
-           (com.hazelcast.config.cp CPSemaphoreConfig)
+           (com.hazelcast.config.cp FencedLockConfig CPSemaphoreConfig)
            (com.hazelcast.config Config
                                  LockConfig
                                  MapConfig
@@ -25,7 +25,9 @@
   [config members]
   (let [cpSubsystemConfig (.getCPSubsystemConfig config)
         raftAlgorithmConfig (.getRaftAlgorithmConfig cpSubsystemConfig)
-        cpSessionAwareSemaphoreConfig (CPSemaphoreConfig.)
+        semaphoreConfig (CPSemaphoreConfig. "jepsen.cpSemaphore" false)
+        lockConfig1 (FencedLockConfig. "jepsen.cpLock1" 1)
+        lockConfig2 (FencedLockConfig. "jepsen.cpLock2" 2)
 
         _ (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
         _ (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
@@ -36,9 +38,9 @@
         _ (.setSessionHeartbeatIntervalSeconds cpSubsystemConfig 5)
         _ (.setSessionTimeToLiveSeconds cpSubsystemConfig 300)
 
-        _ (.setJdkCompatible cpSessionAwareSemaphoreConfig false)
-        _ (.setName cpSessionAwareSemaphoreConfig "jepsen.cpSemaphore")
-        _ (.addCPSemaphoreConfig cpSubsystemConfig cpSessionAwareSemaphoreConfig)
+        _ (.addSemaphoreConfig cpSubsystemConfig semaphoreConfig)
+        _ (.addLockConfig cpSubsystemConfig lockConfig1)
+        _ (.addLockConfig cpSubsystemConfig lockConfig2)
 
       ]
     cpSubsystemConfig))
