@@ -15,7 +15,7 @@ while [[ ${round} -le ${repeat} ]]; do
 
     echo "running cp-lock test"
 
-    lein run test --workload cp-lock --time-limit ${test_duration}
+    lein run test --workload cp-non-reentrant-lock --time-limit ${test_duration}
 
     if [[ $? != '0' ]]; then
         echo "cp-lock test failed"

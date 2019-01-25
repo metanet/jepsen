@@ -681,7 +681,6 @@
                      (some? owner) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
                      (= fence INVALID_FENCE) (FencedMutex. client lockFence owner)
                      (> fence lockFence) (FencedMutex. client fence owner)
-                     (and (= fence lockFence) (= client prevOwner)) (FencedMutex. client fence owner)
                      :else (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
                      )
           :release (if (or (nil? owner) (not= owner client))
@@ -714,26 +713,20 @@
         (condp = (:f op)
           :acquire (cond
                      ; if the lock is not held
-                     (nil? owner) (cond
-                                    ; I can have an invalid fence or a fence larger than highestObservedFence
-                                    (or (= fence INVALID_FENCE) (> fence highestObservedFence))
-                                    (ReentrantFencedMutex. client 1 fence (max fence highestObservedFence) highestObservedFenceOwner)
-                                    ; I was the previous lock owner, I acquired the lock and got the same fence
-                                    ; with the previous one, probably because I encountered operation timeout
-                                    ; and didn't release the lock
-                                    (and (= fence highestObservedFence) (= client highestObservedFenceOwner))
-                                    (do
-                                      ; (info (str "suspicious new fence: " highestObservedFence " for same owner: " highestObservedFenceOwner))
-                                      (ReentrantFencedMutex. client 1 fence highestObservedFence highestObservedFenceOwner))
-                                    :else
-                                    (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
+                     (nil? owner)
+                      (cond
+                        ; I can have an invalid fence or a fence larger than highestObservedFence
+                        (or (= fence INVALID_FENCE) (> fence highestObservedFence))
+                        :else
+                        (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
+                      )
                      ; if the new acquire does not match to the current lock owner, or the lock is already acquired twice, we cannot acquire anymore
-                     (or (not= owner client) (= lockCount 2)) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
+                     (or (not= owner client) (= lockCount REENTRANT_LOCK_ACQUIRE_COUNT)) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
                      ; if the lock is acquired without a fence, and the new acquire has no fence or a fence larger than highestObservedFence
                      (= currentFence INVALID_FENCE) (cond (or (= fence INVALID_FENCE) (> fence highestObservedFence))
-                                               (ReentrantFencedMutex. client 2 fence (max fence highestObservedFence) highestObservedFenceOwner)
-                                               :else
-                                               (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
+                                                      (ReentrantFencedMutex. client 2 fence (max fence highestObservedFence) highestObservedFenceOwner)
+                                                    :else
+                                                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
                      ; if the lock is acquired with a fence, and the new acquire has no fence or the same fence
                      (or (= fence INVALID_FENCE) (= fence currentFence)) (ReentrantFencedMutex. client 2 currentFence highestObservedFence highestObservedFenceOwner)
                      :else (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
@@ -808,7 +801,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (model/mutex)}
-   :cp-lock                    {:client    (fenced-lock-client "jepsen.cpLock1")
+   :cp-non-reentrant-lock        {:client    (fenced-lock-client "jepsen.cpLock1")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
@@ -817,7 +810,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createOwnerAwareMutex)}
-   :cp-reentrant-lock          {:client    (fenced-lock-client "jepsen.cpLock2")
+   :cp-reentrant-lock            {:client    (fenced-lock-client "jepsen.cpLock2")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
@@ -828,7 +821,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createReentrantMutex)}
-   :fenced-lock             {:client    (fenced-lock-client "jepsen.cpLock1")
+   :fenced-lock                  {:client    (fenced-lock-client "jepsen.cpLock1")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
@@ -837,7 +830,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createFencedMutex)}
-   :reentrant-fenced-lock   {:client    (fenced-lock-client "jepsen.cpLock2")
+   :reentrant-fenced-lock        {:client    (fenced-lock-client "jepsen.cpLock2")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
@@ -848,7 +841,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createReentrantFencedMutex)}
-   :cp-semaphore {:client    (cp-semaphore-client)
+   :cp-semaphore {:client        (cp-semaphore-client)
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
