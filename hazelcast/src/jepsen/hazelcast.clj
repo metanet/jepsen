@@ -717,6 +717,7 @@
                       (cond
                         ; I can have an invalid fence or a fence larger than highestObservedFence
                         (or (= fence INVALID_FENCE) (> fence highestObservedFence))
+                        (ReentrantFencedMutex. client 1 fence (max fence highestObservedFence) highestObservedFenceOwner)
                         :else
                         (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
                       )
