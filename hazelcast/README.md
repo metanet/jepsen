@@ -72,6 +72,7 @@ in future.
 ## License
 
 Original work Copyright © 2015-2019, Jepsen, LLC
+
 Modified work Copyright © 2019, Hazelcast, Inc. All Rights Reserved. 
 
 Distributed under the Eclipse Public License version 1.0 or (at your option) any later version.
