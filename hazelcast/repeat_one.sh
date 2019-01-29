@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 
 if [ $# != 3 ]; then
-	echo "usage: ./repeat_all.sh repeat workload test_duration"
+	echo "usage: ./repeat_all.sh workload repeat test_duration"
 	exit 1
 fi
 
-repeat=$1
-workload=$2
+workload=$1
+repeat=$2
 test_duration=$3
 round="1"
 
-while [[ ${round} -le ${repeat} ]]; do
+while [ ${round} -le ${repeat} ]; do
 
     echo "round: $round"
 
@@ -18,7 +18,7 @@ while [[ ${round} -le ${repeat} ]]; do
 
     lein run test --workload ${workload} --time-limit ${test_duration}
 
-    if [[ $? != '0' ]]; then
+    if [ $? != '0' ]; then
         echo "$workload test failed"
         exit 1
     fi

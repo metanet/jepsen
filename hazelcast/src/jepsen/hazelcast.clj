@@ -166,12 +166,12 @@
 
 
 (defn create-cp-atomic-long
-  "Creates a new Raft based AtomicLong"
+  "Creates a new CP based AtomicLong"
   [client name]
   (.getAtomicLong (.getCPSubsystem client) name))
 
 (defn cp-atomic-long-id-client
-  "Generates unique IDs using a Raft based AtomicLong"
+  "Generates unique IDs using a CP based AtomicLong"
   [conn atomic-long]
   (reify client/Client
     (setup! [_ test node]
@@ -186,7 +186,7 @@
       (.shutdown conn))))
 
 (defn cp-cas-register-client
-  "A CAS register using a Raft based AtomicLong"
+  "A CAS register using a CP AtomicLong"
   [conn atomic-long]
   (reify client/Client
     (setup! [_ test node]
@@ -802,7 +802,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (model/mutex)}
-   :cp-non-reentrant-lock        {:client    (fenced-lock-client "jepsen.cpLock1")
+   :non-reentrant-cp-lock        {:client    (fenced-lock-client "jepsen.cpLock1")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
@@ -811,7 +811,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createOwnerAwareMutex)}
-   :cp-reentrant-lock            {:client    (fenced-lock-client "jepsen.cpLock2")
+   :reentrant-cp-lock            {:client    (fenced-lock-client "jepsen.cpLock2")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}
@@ -822,7 +822,7 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createReentrantMutex)}
-   :fenced-lock                  {:client    (fenced-lock-client "jepsen.cpLock1")
+   :non-reentrant-fenced-lock    {:client    (fenced-lock-client "jepsen.cpLock1")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
@@ -851,6 +851,19 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createAcquiredPermitsModel)}
+   :cp-atomic-long-ids           {:client    (cp-atomic-long-id-client nil nil)
+                                  :generator (->> {:type :invoke, :f :generate}
+                                                (gen/stagger 0.5))
+                                  :checker   (checker/unique-ids)}
+   :cp-cas-register              {:client    (cp-cas-register-client nil nil)
+                                  :generator (->> (gen/mix [{:type :invoke, :f :read}
+                                                          {:type :invoke, :f :write, :value (rand-int 5)}
+                                                          (gen/sleep 1)
+                                                          {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
+                                                gen/each
+                                                (gen/stagger 0.5))
+                                  :checker   (checker/linearizable)
+                                  :model     (model/cas-register 0)}
    :queue                        (assoc (queue-client-and-gens)
                                    :checker (checker/total-queue))
    :atomic-ref-ids               {:client    (atomic-ref-id-client nil nil)
@@ -861,19 +874,6 @@
                                   :generator (->> {:type :invoke, :f :generate}
                                                   (gen/stagger 0.5))
                                   :checker   (checker/unique-ids)}
-   :cp-atomic-long-ids         {:client    (cp-atomic-long-id-client nil nil)
-                                  :generator (->> {:type :invoke, :f :generate}
-                                                  (gen/stagger 0.5))
-                                  :checker   (checker/unique-ids)}
-   :cp-cas-register            {:client    (cp-cas-register-client nil nil)
-                                  :generator (->> (gen/mix [{:type :invoke, :f :read}
-                                                            {:type :invoke, :f :write, :value (rand-int 5)}
-                                                            (gen/sleep 1)
-                                                            {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
-                                                  gen/each
-                                                  (gen/stagger 0.5))
-                                  :checker   (checker/linearizable)
-                                  :model     (model/cas-register 0)}
    :id-gen-ids                   {:client    (id-gen-id-client nil nil)
                                   :generator {:type :invoke, :f :generate}
                                   :checker   (checker/unique-ids)}})
