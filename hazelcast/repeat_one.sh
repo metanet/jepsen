@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 if [ $# != 3 ]; then
-	echo "usage: ./repeat_all.sh workload repeat test_duration"
+	echo "usage: ./repeat_one.sh workload repeat test_duration"
 	exit 1
 fi
 
