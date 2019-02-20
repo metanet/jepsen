@@ -170,8 +170,15 @@
   [client name]
   (.getAtomicLong (.getCPSubsystem client) name))
 
+
+(defn create-cp-atomic-reference
+  "Creates a new CP based AtomicReference"
+  [client name]
+  (.getAtomicReference (.getCPSubsystem client) name))
+
+
 (defn cp-atomic-long-id-client
-  "Generates unique IDs using a CP based AtomicLong"
+  "Generates unique IDs using a CP AtomicLong"
   [conn atomic-long]
   (reify client/Client
     (setup! [_ test node]
@@ -185,13 +192,13 @@
     (teardown! [this test]
       (.shutdown conn))))
 
-(defn cp-cas-register-client
+(defn cp-cas-long-client
   "A CAS register using a CP AtomicLong"
   [conn atomic-long]
   (reify client/Client
     (setup! [_ test node]
       (let [conn (connect node)]
-        (cp-cas-register-client conn (create-cp-atomic-long conn "jepsen.cas-register"))))
+        (cp-cas-long-client conn (create-cp-atomic-long conn "jepsen.cas-long"))))
 
     (invoke! [this test op]
       (case (:f op)
@@ -200,6 +207,30 @@
                    (assoc op :type :ok))
         :cas (let [[currentV newV] (:value op)]
                (if (.compareAndSet atomic-long currentV newV)
+                 (assoc op :type :ok)
+                 (assoc op :type :fail :error :cas-failed)
+                 ))
+        )
+      )
+
+    (teardown! [this test]
+      (.shutdown conn))))
+
+(defn cp-cas-reference-client
+  "A CAS register using a CP AtomicReference"
+  [conn atomic-ref]
+  (reify client/Client
+    (setup! [_ test node]
+      (let [conn (connect node)]
+        (cp-cas-reference-client conn (create-cp-atomic-reference conn "jepsen.cas-register"))))
+
+    (invoke! [this test op]
+      (case (:f op)
+        :read (assoc op :type :ok, :value (.get atomic-ref))
+        :write (do (.set atomic-ref (:value op))
+                   (assoc op :type :ok))
+        :cas (let [[currentV newV] (:value op)]
+               (if (.compareAndSet atomic-ref currentV newV)
                  (assoc op :type :ok)
                  (assoc op :type :fail :error :cas-failed)
                  ))
@@ -851,17 +882,26 @@
                                                   (gen/stagger 1/10))
                                   :checker   (checker/linearizable)
                                   :model     (createAcquiredPermitsModel)}
-   :cp-atomic-long-ids           {:client    (cp-atomic-long-id-client nil nil)
+   :cp-id-gen-long               {:client    (cp-atomic-long-id-client nil nil)
                                   :generator (->> {:type :invoke, :f :generate}
                                                 (gen/stagger 0.5))
                                   :checker   (checker/unique-ids)}
-   :cp-cas-register              {:client    (cp-cas-register-client nil nil)
+   :cp-cas-long                  {:client    (cp-cas-long-client nil nil)
                                   :generator (->> (gen/mix [{:type :invoke, :f :read}
-                                                          {:type :invoke, :f :write, :value (rand-int 5)}
-                                                          (gen/sleep 1)
-                                                          {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
+                                                            {:type :invoke, :f :write, :value (rand-int 5)}
+                                                            (gen/sleep 1)
+                                                            {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
                                                 gen/each
                                                 (gen/stagger 0.5))
+                                  :checker   (checker/linearizable)
+                                  :model     (model/cas-register 0)}
+   :cp-cas-reference             {:client    (cp-cas-reference-client nil nil)
+                                  :generator (->> (gen/mix [{:type :invoke, :f :read}
+                                                            {:type :invoke, :f :write, :value (rand-int 5)}
+                                                            (gen/sleep 1)
+                                                            {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]}])
+                                                  gen/each
+                                                  (gen/stagger 0.5))
                                   :checker   (checker/linearizable)
                                   :model     (model/cas-register 0)}
    :queue                        (assoc (queue-client-and-gens)

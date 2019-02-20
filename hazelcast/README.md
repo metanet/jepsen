@@ -6,7 +6,8 @@ A Jepsen test suite for Hazelcast IMDG.
 
 We run the Jepsen tests using docker containers for convenience.
 
-Make sure Docker is installed and execute the following command to start Jepsen containers:
+First, make sure that Docker is installed. To start Jepsen containers, execute the following command in `jepsen` 
+directory which is one level up from `hazelcast` directory:
 
     $ cd docker && ./up.sh
      
@@ -23,8 +24,8 @@ While you are at the `hazelcast` directory, you can run our Jepsen tests using `
 `lein run test --workload non-reentrant-cp-lock --time-limit 120` runs the non-reentrant lock test for 120 seconds.
 
 You can also use the `repeat` scripts to run tests multiple times. For instance, while in the `hazelcast` directory, 
-run `sh repeat_one.sh non-reentrant-cp-lock 5 120` to run the non-reentrant lock test 5 times, each test taking 120 
-seconds, or run `sh repeat_all.sh 5 120` to run the whole CP subsystem test suite 5 times, each test taking 120 seconds. 
+run `sh repeat_single_test.sh non-reentrant-cp-lock 5 120` to run the non-reentrant CP lock test 5 times, each test taking 120 
+seconds, or run `sh repeat_all_cp_tests.sh 5 120` to run the whole CP subsystem test suite 5 times, each test taking 120 seconds. 
 These scripts stop on a test failure so that you can report and investigate the failure. 
 
 ## Test Cases
@@ -57,11 +58,14 @@ this test.
 - Semaphore (`--workload semaphore`): In this test, we initialize our new linearizable `ISemaphore` with 2 permits. Each
 client acquires and releases a permit in a loop and we validate permits are held by at most 2 clients at a time.  
 
-- Unique ID Generation with the new linearizable `IAtomicLong` (`--workload cp-atomic-long-ids`): In this test, 
+- Unique ID Generation with the new linearizable `IAtomicLong` (`--workload cp-id-gen-long`): In this test, 
 each client generates a unique long id by using a linearizable `IAtomicLong` instance and we validate uniqueness of 
 generated ids.
 
-- Compare-and-swap Register with the new linearizable `IAtomicLong` (`--workload cp-cas-register`): In this test, 
+- Compare-and-swap Register with the new linearizable `IAtomicLong` (`--workload cp-cas-long`): In this test, 
+clients randomly perform write and compare-and-swap operations.
+
+- Compare-and-swap Register with the new linearizable `IAtomicReference` (`--workload cp-cas-reference`): In this test, 
 clients randomly perform write and compare-and-swap operations.
 
 In each test, multiple clients send concurrent operations to a shared data structure, which is replicated 

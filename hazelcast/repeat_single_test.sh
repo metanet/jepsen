@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
 if [ $# != 3 ]; then
-	echo "usage: ./repeat_one.sh workload repeat test_duration"
+	echo "usage: ./repeat_single_test.sh test_name repeat test_duration"
 	exit 1
 fi
 
-workload=$1
+test_name=$1
 repeat=$2
 test_duration=$3
 round="1"
@@ -14,12 +14,12 @@ while [ ${round} -le ${repeat} ]; do
 
     echo "round: $round"
 
-    echo "running $workload test"
+    echo "running $test_name test"
 
-    lein run test --workload ${workload} --time-limit ${test_duration}
+    lein run test --workload ${test_name} --time-limit ${test_duration}
 
     if [ $? != '0' ]; then
-        echo "$workload test failed"
+        echo "$test_name test failed"
         exit 1
     fi
 
