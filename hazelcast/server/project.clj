@@ -10,7 +10,7 @@
                  [org.clojure/tools.cli "0.3.5"]
                  [org.clojure/tools.logging "0.3.1"]
                  [spootnik/unilog "0.7.13"]
-                 [com.hazelcast/hazelcast "3.12-SNAPSHOT"]]
+                 [com.hazelcast/hazelcast "3.12-BETA-1"]]
   :profiles {:uberjar {:uberjar-name "hazelcast-server.jar"}}
   :main jepsen.hazelcast-server
   :aot [jepsen.hazelcast-server])
