@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 if [ $# != 3 ]; then
-	echo "usage: ./repeat_single_test.sh test_name repeat test_duration"
+	echo "how to use: ./repeat_single_test.sh test_name repeat test_duration"
 	exit 1
 fi
 

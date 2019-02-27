@@ -60,14 +60,14 @@
   "Ensures the server jar is ready"
   [test node]
   (when (= node (jepsen/primary test))
-    ; (when-not (.exists (io/file local-server-jar))
+    (when-not (.exists (io/file local-server-jar))
     (info "Building server")
     (let [{:keys [exit out err]} (sh "lein" "uberjar" :dir "server")]
       (info out)
       (info err)
       (info exit)
       (assert (zero? exit)))))
-; )
+ )
 
 (defn install!
   "Installs the server on remote nodes."

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 if [ $# != 2 ]; then
-	echo "usage: ./repeat_all_cp_tests.sh repeat test_duration"
+	echo "how to use: ./repeat_all_cp_tests.sh repeat test_duration"
 	exit 1
 fi
 
