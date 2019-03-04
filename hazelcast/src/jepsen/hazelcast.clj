@@ -517,9 +517,7 @@
   (step [this op]
     (let [client (get-client client-uids-to-client-names-map op)]
       (if (nil? client)
-        (do
-          (warn "no owner!")
-          (knossos.model/inconsistent "no owner!"))
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (if (and (< lockCount reentrant-lock-acquire-count) (or (nil? owner) (= owner client)))
                      (ReentrantMutex. client-uids-to-client-names-map client (+ lockCount 1))
@@ -542,9 +540,7 @@
   (step [this op]
     (let [client (get-client client-uids-to-client-names-map op)]
       (if (nil? client)
-        (do
-          (warn (str "no owner! " op))
-          (knossos.model/inconsistent (str "no owner! " op)))
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (if (nil? owner)
                      (OwnerAwareMutex. client-uids-to-client-names-map client)
@@ -571,9 +567,7 @@
   (step [this op]
     (let [client (get-client client-uids-to-client-names-map op) fence (get-fence op)]
       (if (nil? client)
-        (do
-          (warn "no owner!")
-          (knossos.model/inconsistent "no owner!"))
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (cond
                      (some? owner) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
@@ -598,9 +592,7 @@
   (step [this op]
     (let [client (get-client client-uids-to-client-names-map op) fence (get-fence op)]
       (if (nil? client)
-        (do
-          (warn "no owner!")
-          (knossos.model/inconsistent "no owner!"))
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (cond
                      ; if the lock is not held
@@ -640,9 +632,7 @@
   (step [this op]
     (let [client (get-client client-uids-to-client-names-map op)]
       (if (nil? client)
-        (do
-          (warn "no owner!")
-          (knossos.model/inconsistent "no owner!"))
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (if (< (reduce + (vals acquired)) num-permits)
                      (AcquiredPermitsModel. client-uids-to-client-names-map (assoc acquired client (+ (get acquired client) 1)))
@@ -729,7 +719,7 @@
                                                   cycle
                                                   gen/seq
                                                   gen/each
-                                                  (gen/stagger 1))
+                                                  (gen/stagger 0.5))
                                   :checker   (checker/linearizable)
                                   :model     (create-reentrant-fenced-mutex client-uids-to-client-names-map)}
    :cp-semaphore {:client        (cp-semaphore-client)
